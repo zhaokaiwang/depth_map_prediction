@@ -1,0 +1,9 @@
+dense-cat/
+dense-fc/
+dense-fcn/
+make3d/
+nyuv2/
+res-fc/ 
+efficient_densenet_pytorch-master/
+.vscode/
+__pycache__/

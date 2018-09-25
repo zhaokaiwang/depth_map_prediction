@@ -62,7 +62,8 @@ def visual_random(mode, dataset, load_model, count):
         visual_result(dataset, model, index)
         pass
 
-def train(mode, dataset, epochs, loss='l1Loss', op='momentum', lr=1e-2, batch_size=4, load_model=None, save_dir=None, source=False):
+def train(mode, dataset, epochs, loss='l1Loss', op='momentum', lr=1e-2, batch_size=4,
+          load_model=None, save_dir=None, source=False, start_index = 0):
     device = torch.device('cuda:0')
     # Get model 
     model = get_model(mode, dataset, source)
@@ -70,7 +71,7 @@ def train(mode, dataset, epochs, loss='l1Loss', op='momentum', lr=1e-2, batch_si
     
     #Check if there is trained model
     if load_model is not None:
-        model.load_state_dict(load_model)
+        model.load_state_dict(torch.load(load_model))
 
     model.train()
     loss_fn = get_loss(loss)
@@ -106,20 +107,21 @@ def train(mode, dataset, epochs, loss='l1Loss', op='momentum', lr=1e-2, batch_si
 
         optim.step()
 
-        if i % 50 == 0:
+        if i % 100 == 0:
             print (i, loss.cpu().detach().numpy())
 
         if i % epoch == epoch - 1:
-            torch.save(model.state_dict(), '{}/{}.pkl'.format(save_dir,i // epoch))
+            torch.save(model.state_dict(), '{}/{}.pkl'.format(save_dir,start_index + i // epoch))
     pass
 
 def test(dataset, mode,  load_model, batch_size=4):
     device = torch.device('cuda:0')
     test_count = int(get_config(dataset, 'test_count'))
     
-    model = get_model(mode, dataset,  source=True)
-    model.load_state_dict(torch.load(load_model))
+    model = get_model(mode, dataset, source=True)
     model.to(device)
+
+    model.load_state_dict(torch.load(load_model))
     model.eval()
 
     temp = test_count // batch_size
@@ -129,6 +131,7 @@ def test(dataset, mode,  load_model, batch_size=4):
     sqrLoss  = torch.Tensor([0.0]).float().cuda()
     rmsLinLoss = torch.Tensor([0.0]).float().cuda()
     rmsLogLoss = torch.Tensor([0.0]).float().cuda()
+    log10Loss = torch.Tensor([0.0]).float().cuda()
     
     count = torch.Tensor([0.]).long().cuda()
 
@@ -153,13 +156,14 @@ def test(dataset, mode,  load_model, batch_size=4):
             depths = depths[mask]
             count += torch.sum(mask)
 
-        thr, abs, sqr, rmsLin, rmsLog = error_mertic(predict, depths)
+        thr, abs, sqr, rmsLin, rmsLog, log10 = error_mertic(predict, depths)
 
         thrLoss = thrLoss + thr.detach()
         absLoss = absLoss + abs.detach()
         sqrLoss = sqrLoss + sqr.detach()
         rmsLinLoss = rmsLinLoss + rmsLin.detach()
         rmsLogLoss = rmsLogLoss + rmsLog.detach()
+        log10Loss = log10Loss + log10.detach()
     
     last = test_count % batch_size
     if last is not 0:
@@ -182,13 +186,14 @@ def test(dataset, mode,  load_model, batch_size=4):
             depths = depths[mask]
             count += torch.sum(mask)
 
-        thr, abs, sqr, rmsLin, rmsLog = error_mertic(predict, depths)
+        thr, abs, sqr, rmsLin, rmsLog, log10 = error_mertic(predict, depths)
 
         thrLoss = thrLoss + thr.detach()
         absLoss = absLoss + abs.detach()
         sqrLoss = sqrLoss + sqr.detach()
         rmsLinLoss = rmsLinLoss + rmsLin.detach()
         rmsLogLoss = rmsLogLoss + rmsLog.detach()
+        log10Loss = log10Loss + log10.detach()
 
     count = count.float()
     thrLoss = thrLoss.float() / count
@@ -197,20 +202,26 @@ def test(dataset, mode,  load_model, batch_size=4):
     sqrLoss = sqrLoss / count
     rmsLinLoss = torch.sqrt(rmsLinLoss / count)
     rmsLogLoss = torch.sqrt(rmsLogLoss / count)
+    log10Loss = log10Loss / count
 
     thrLoss = thrLoss.cpu().detach().numpy()
     absLoss = absLoss.cpu().detach().numpy()
     sqrLoss = sqrLoss.cpu().detach().numpy()
     rmsLinLoss = rmsLinLoss.cpu().detach().numpy()
     rmsLogLoss = rmsLogLoss.cpu().detach().numpy()
-    print (thrLoss, absLoss, sqrLoss, rmsLinLoss, rmsLogLoss) 
+    log10Loss = log10Loss.cpu().detach().numpy()
+
+    print (thrLoss, absLoss, sqrLoss, rmsLinLoss, rmsLogLoss, log10Loss) 
     pass
 
 # train('res-fc', 'Make3D', 20, batch_size=8, loss='l1Loss', save_dir='res-fc')
-# train('dense-fc', 'Make3D', 20, batch_size=4, loss='l1Loss', save_dir='dense-fc')
-train('dense-cat', 'Make3D', 10, batch_size=8, loss='l1Loss', save_dir='dense-cat')
-# for i in range(20):
-#test('Make3D', 'dense-cat', 'dense-cat/19.pkl', 4)
+# train('dense-fc', 'Make3D', 5, batch_size=16, loss='l1Loss', save_dir='dense-fc')
+# train('dense-cat', 'Make3D', 20, batch_size=8, loss='l1Loss', save_dir='dense-cat')
+train('dense-fcn', 'Make3D', 20, batch_size=8, loss='l2Loss', save_dir='dense-fcn/l2Loss', load_model=None, start_index=0, lr=1e-4)
 
-# visual_random('dense-cat', 'Make3D', 'dense-cat/19.pkl', 4)
-# visual_random('dense-fc', 'Make3D', 'dense-fc/19.pkl', 1)
+# test('Make3D', 'dense-cat', 'dense-cat/9.pkl', 4)
+# for i in range(28, 39):
+#     test('Make3D', 'dense-fcn', 'dense-fcn/{}.pkl'.format(i), 4)
+
+# visual_random('dense-cat', 'Make3D', 'dense-fcn/30.pkl', 1)
+# visual_random('dense-fcn', 'Make3D', 'dense-fcn/30.pkl', 5)

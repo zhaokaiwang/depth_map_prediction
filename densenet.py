@@ -41,17 +41,6 @@ class _DenseLayer(nn.Module):
             new_features = F.dropout(new_features, p=self.drop_rate, training=self.training)
         return new_features
 
-
-class _Transition(nn.Sequential):
-    def __init__(self, num_input_features, num_output_features):
-        super(_Transition, self).__init__()
-        self.add_module('norm', nn.BatchNorm2d(num_input_features))
-        self.add_module('relu', nn.ReLU(inplace=True))
-        self.add_module('conv', nn.Conv2d(num_input_features, num_output_features,
-                                          kernel_size=1, stride=1, bias=False))
-        self.add_module('pool', nn.AvgPool2d(kernel_size=2, stride=2))
-
-
 class _DenseBlock(nn.Module):
     def __init__(self, num_layers, num_input_features, bn_size, growth_rate, drop_rate, efficient=False):
         super(_DenseBlock, self).__init__()
@@ -101,7 +90,7 @@ class _Transition_down(nn.Sequential):
         self.add_module('relu', nn.ReLU(inplace=True))
         self.add_module('conv', nn.Conv2d(num_input_features, num_output_features,
                                           kernel_size=1, stride=1, bias=False))
-        self.add_module('dropout', nn.Dropout(drop_rate))
+        #self.add_module('dropout', nn.Dropout(drop_rate))
         self.add_module('max_pooling', nn.MaxPool2d(kernel_size=2, stride=2))
     
 
@@ -127,7 +116,7 @@ class densenet_cat(nn.Module):
     """
 
     def __init__(self, dataset, growth_rate=16, block_config=[4, 5, 7, 10, 12], last_layer=15,
-                 num_init_features=48, bn_size=4, drop_rate=0.2, efficient=True,
+                 num_init_features=48, bn_size=4, drop_rate=0.2, efficient=False,
                  constrain=False, source=False):
         super(densenet_cat, self).__init__()
 
@@ -139,6 +128,7 @@ class densenet_cat(nn.Module):
         self.last_layer = last_layer
         self.constrain = constrain
         self.source = source
+        self.block_config = block_config
 
         #Read the config file and the input and source resolution
         self.input_height = int(get_config(dataset, 'input_height'))
@@ -154,9 +144,9 @@ class densenet_cat(nn.Module):
         self.conv = nn.Conv2d(3, num_init_features, kernel_size=3, stride=1, padding=1, bias=False)
 
         #Dense block and transtion down
-        for i in range(len(block_config)):
-            self.add_module('denseBlock{}'.format(i), _DenseBlock(block_config[i], num_features, self.bn_size, self.growth_rate, self.drop_rate, efficient=self.efficient))
-            num_features = num_features + growth_rate * block_config[i]
+        for i in range(len(self.block_config)):
+            self.add_module('denseBlock{}'.format(i), _DenseBlock(self.block_config[i], num_features, self.bn_size, self.growth_rate, self.drop_rate, efficient=self.efficient))
+            num_features = num_features + growth_rate * self.block_config[i]
             self.features.append(num_features)
             self.add_module('transitionDown{}'.format(i), _Transition_down(num_features, num_features, self.drop_rate))
             self.resolution.append([self.resolution[-1][0] // 2, self.resolution[-1][1] // 2])
@@ -164,14 +154,14 @@ class densenet_cat(nn.Module):
         self.add_module('last_denseBlock', _DenseBlock_last(last_layer, num_features, self.bn_size, self.growth_rate, self.drop_rate, self.efficient))
         num_features = num_features + growth_rate * last_layer
         
-        block_config.append(last_layer)
-        block_config = block_config[::-1]
+        self.block_config.append(last_layer)
+        self.block_config = self.block_config[::-1]
         self.features = self.features[::-1]
         self.resolution = self.resolution[::-1]
 
         #Reverse dense block and tranistion up 
-        for i in range(len(block_config) - 1):
-            self.add_module('deDenseBlock{}'.format(i), _DenseBlock_last(block_config[i + 1], self.features[i] + block_config[i] * self.growth_rate, self.bn_size, self.growth_rate, self.drop_rate, self.efficient))
+        for i in range(len(self.block_config) - 1):
+            self.add_module('deDenseBlock{}'.format(i), _DenseBlock_last(self.block_config[i + 1], self.features[i] + self.block_config[i] * self.growth_rate, self.bn_size, self.growth_rate, self.drop_rate, self.efficient))
             
             in_h, in_w = self.resolution[i][0], self.resolution[i][1]
             out_h, out_w = self.resolution[i + 1][0], self.resolution[i + 1][1]
@@ -184,12 +174,14 @@ class densenet_cat(nn.Module):
                 pad[1], out_pad[1] = 0, 0
 
             pad, out_pad = tuple(pad), tuple(out_pad)
-            self.add_module('transitionUp{}'.format(i), _Transition_up(block_config[i] * self.growth_rate, pad, out_pad))
+            self.add_module('transitionUp{}'.format(i), _Transition_up(self.block_config[i] * self.growth_rate, pad, out_pad))
 
-        self.last_conv = nn.Conv2d(block_config[-1] * self.growth_rate, 1, 1, stride=1, bias=False)
+        self.last_conv = nn.Conv2d(self.block_config[-1] * self.growth_rate, 1, 1, stride=1, bias=False)
 
         if self.source:
             self.upsample = nn.Upsample(size=[self.source_height, self.source_weight], mode='bilinear', align_corners=True)
+        else:
+            self.upsample = nn.Upsample(size=[self.input_height, self.input_weight], mode='bilinear', align_corners=True)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -282,6 +274,7 @@ class densenet_fcn(nn.Module):
         self.last_layer = last_layer
         self.constrain = constrain
         self.source = source
+        self.block_config = block_config
 
         #Read the config file and the input and source resolution
         self.input_height = int(get_config(dataset, 'input_height'))
@@ -297,9 +290,9 @@ class densenet_fcn(nn.Module):
         self.conv = nn.Conv2d(3, num_init_features, kernel_size=3, padding=1, bias=False)
 
         #Dense block and transtion down
-        for i in range(len(block_config)):
-            self.add_module('denseBlock{}'.format(i), _DenseBlock(block_config[i], num_features, self.bn_size, self.growth_rate, self.drop_rate, efficient=self.efficient))
-            num_features = num_features + growth_rate * block_config[i]
+        for i in range(len(self.block_config)):
+            self.add_module('denseBlock{}'.format(i), _DenseBlock(self.block_config[i], num_features, self.bn_size, self.growth_rate, self.drop_rate, efficient=self.efficient))
+            num_features = num_features + growth_rate * self.block_config[i]
             self.features.append(num_features)
             self.add_module('transitionDown{}'.format(i), _Transition_down(num_features, num_features, self.drop_rate))
             self.resolution.append([self.resolution[-1][0] // 2, self.resolution[-1][1] // 2])
@@ -307,14 +300,14 @@ class densenet_fcn(nn.Module):
         self.add_module('last_denseBlock', _DenseBlock_last(last_layer, num_features, self.bn_size, self.growth_rate, self.drop_rate, self.efficient))
         num_features = num_features + growth_rate * last_layer
         
-        block_config.append(last_layer)
-        block_config = block_config[::-1]
+        self.block_config.append(last_layer)
+        self.block_config = self.block_config[::-1]
         self.features = self.features[::-1]
         self.resolution = self.resolution[::-1]
 
         #Reverse dense block and tranistion up 
-        for i in range(len(block_config) - 1):
-            self.add_module('deDenseBlock{}'.format(i), _DenseBlock_last(block_config[i + 1], self.features[i] + block_config[i] * self.growth_rate, self.bn_size, self.growth_rate, self.drop_rate, self.efficient))
+        for i in range(len(self.block_config) - 1):
+            self.add_module('deDenseBlock{}'.format(i), _DenseBlock_last(self.block_config[i + 1], self.features[i] + self.block_config[i] * self.growth_rate, self.bn_size, self.growth_rate, self.drop_rate, self.efficient))
             
             in_h, in_w = self.resolution[i][0], self.resolution[i][1]
             out_h, out_w = self.resolution[i + 1][0], self.resolution[i + 1][1]
@@ -327,13 +320,14 @@ class densenet_fcn(nn.Module):
                 pad[1], out_pad[1] = 0, 0
 
             pad, out_pad = tuple(pad), tuple(out_pad)
-            self.add_module('transitionUp{}'.format(i), _Transition_up(block_config[i] * self.growth_rate, pad, out_pad))
-            self.add_module('predict{}'.format(i), nn.Conv2d(block_config[i] * self.growth_rate, 1, 3, stride=1, bias=False, padding=1))
+            self.add_module('transitionUp{}'.format(i), _Transition_up(self.block_config[i] * self.growth_rate, pad, out_pad))
+            self.add_module('predict{}'.format(i), nn.Conv2d(self.block_config[i] * self.growth_rate, 1, 3, stride=1, bias=False, padding=1))
         
-        self.last_conv = nn.Conv2d(block_config[-1] * self.growth_rate, 1, 1, stride=1, padding=1, bias=False)
-        if self.source:
-            self.upsample = nn.Upsample(size=[self.source_height, self.source_weight], mode='bilinear', align_corners=True)
+        self.last_conv = nn.Conv2d(self.block_config[-1] * self.growth_rate, 1, 1, stride=1, bias=False)
+        self.upsample_source = nn.Upsample(size=[self.source_height, self.source_weight], mode='bilinear', align_corners=True)
+        self.upsample_input = nn.Upsample(size=[self.input_height, self.source_weight], mode='bilinear', align_corners=True)
 
+        self.add_module('predict', nn.Conv2d(5, 1, 1, bias=False))
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight,  nonlinearity='relu')
@@ -391,23 +385,28 @@ class densenet_fcn(nn.Module):
         output = self.deDenseBlock3(output)
         
         output = self.transitionUp4(output)
-        predict4 = self.predict4(output)
         output = torch.cat([output, cat0], 1)
         output = self.deDenseBlock4(output) 
 
         output = self.last_conv(output)
 
+        predict0 = self.upsample_input(predict0)
+        predict1 = self.upsample_input(predict1)
+        predict2 = self.upsample_input(predict2)
+        predict3 = self.upsample_input(predict3)
+        output = torch.cat([predict0, predict1, predict2, predict3, output], 1)
+        output = self.predict(output)
+          
         if self.source is True:
-            output = self.upsample(output)
+            output = self.upsample_source(output)
 
         output = torch.squeeze(output, 1)
         return output
 
-
 class densenet_fc(nn.Module):
     def __init__(self, dataset, source=False):
         super(densenet_fc, self).__init__()
-        self.model = torchvision.models.densenet121(pretrained=True)
+        self.model = torchvision.models.densenet121(pretrained=False)
 
         self.source = source
         #Read the config file and the input and source resolution
@@ -437,12 +436,11 @@ class densenet_fc(nn.Module):
         output= self.upsample(output)
         output = torch.squeeze(output, dim=1)
         return output
-        pass
 
 
 def main():
     device = torch.device('cuda:0')
-    model = densenet_fc('Make3D')
+    model = densenet_fcn('Make3D')
     model.to(device)
     input = np.random.rand(8, 3, 256, 192).astype(np.float32)
     input = torch.from_numpy(input)

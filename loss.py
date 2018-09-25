@@ -23,10 +23,11 @@ class l2Loss(nn.Module):
     def forward(self, input, target, mask):
         input = input[mask]
         target = target[mask]
-
+        count = torch.sum(mask).float()
+        
         temp = input - target
         temp = torch.sum(torch.pow(temp, 2))
-        
+        temp = temp / count
         return temp
         
 class thresholdLoss(nn.Module):
@@ -79,6 +80,14 @@ class rmseLog(nn.Module):
 
         return temp
 
+class log10Loss(nn.Module):
+    def __init__(self):
+        super(log10Loss, self).__init__()
+    
+    def forward(self, input, target):
+        temp = torch.log10(input) - torch.log10(target)
+        return torch.sum(torch.abs(temp))
+
 def error_mertic(predict, target):
     device = torch.device('cuda:0')
 
@@ -87,14 +96,16 @@ def error_mertic(predict, target):
     sqrRel = squareRelative().to(device)
     rmsLin = rmseLinear().to(device)
     rmsLog = rmseLog().to(device)
+    log10Error = log10Loss().to(device)
 
     thrLoss = threshold(predict, target, 1.25)
     absLoss = absRel(predict, target)
     sqrLoss = sqrRel(predict, target)
     rmsLinLoss = rmsLin(predict, target)
     rmsLogLoss = rmsLog(predict, target)
+    log10 = log10Error(predict, target)
 
-    return thrLoss, absLoss, sqrLoss, rmsLinLoss, rmsLogLoss
+    return thrLoss, absLoss, sqrLoss, rmsLinLoss, rmsLogLoss, log10
 
 def get_loss(loss):
     if loss not in ['l1Loss', 'l2Loss']:

@@ -24,9 +24,13 @@ def get_model(mode, dataset, source):
     elif mode == 'dense-fc':
         return densenet_fc(dataset, source=source)
     elif mode == 'dense-cat':
-        return densenet_cat(dataset, source=source)
+        return densenet_cat(dataset, growth_rate=16, block_config=[4, 5, 7, 10, 12], last_layer=15,
+                 num_init_features=48, bn_size=4, drop_rate=0.2, efficient=True,
+                 constrain=False, source=True)
     elif mode == 'dense-fcn':
-        return densenet_fcn(dataset, source=source)
+        return densenet_fcn(dataset, growth_rate=16, block_config=[4, 5, 7, 10, 12], last_layer=15,
+                 num_init_features=48, bn_size=4, drop_rate=0.2, efficient=True,
+                 constrain=False, source=True)
     
 
 def main():

@@ -29,7 +29,31 @@ class l2Loss(nn.Module):
         temp = torch.sum(torch.pow(temp, 2))
         temp = temp / count
         return temp
+
+class berhuLoss(nn.Module):
+    def __init__(self):
+        super(berhuLoss, self).__init__()
+
+    def forward(self, input, target, mask):
+        input = input[mask]
+        target = target[mask]
+        count = torch.sum(mask).float()
         
+        temp = torch.abs(input - target)
+        max_one = torch.max(temp) / 5
+        max_value = float(max_one.detach().cpu().numpy())
+
+        less_part = temp <= max_one
+        bigger_part = temp > max_one
+
+        loss = torch.sum(temp[less_part])
+        bigger_part = temp[bigger_part]
+
+        bigger_part_loss = torch.sum(bigger_part * bigger_part + max_value * max_value)
+        bigger_part_loss = bigger_part / 2 / max_value
+        loss = torch.sum(bigger_part_loss) + loss
+
+        return loss / count
 class thresholdLoss(nn.Module):
     def __init__(self):
         super(thresholdLoss, self).__init__()
@@ -88,6 +112,7 @@ class log10Loss(nn.Module):
         temp = torch.log10(input) - torch.log10(target)
         return torch.sum(torch.abs(temp))
 
+
 def error_mertic(predict, target):
     device = torch.device('cuda:0')
 
@@ -108,13 +133,15 @@ def error_mertic(predict, target):
     return thrLoss, absLoss, sqrLoss, rmsLinLoss, rmsLogLoss, log10
 
 def get_loss(loss):
-    if loss not in ['l1Loss', 'l2Loss']:
+    if loss not in ['l1Loss', 'l2Loss', 'berhuLoss']:
         raise NotImplementedError('loss {} has not been supported'.format(loss))
 
     if loss is 'l1Loss':
         return l1Loss()
     elif loss is 'l2Loss':
         return l2Loss()
+    elif loss is 'berhuLoss':
+        return berhuLoss()
 
 
 def main():

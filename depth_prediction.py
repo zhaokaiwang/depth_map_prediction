@@ -41,9 +41,9 @@ def visual_result(dataset, model, index):
     plt.subplot(1, 3, 1)
     plt.imshow(image)
     plt.subplot(1, 3, 2)
-    plt.imshow(depth, cmap='gray')
+    plt.imshow(depth)
     plt.subplot(1, 3, 3)
-    plt.imshow(predict, cmap='gray')
+    plt.imshow(predict)
     plt.show()
 
 def visual_random(mode, dataset, load_model, count):
@@ -217,11 +217,32 @@ def test(dataset, mode,  load_model, batch_size=4):
 # train('res-fc', 'Make3D', 20, batch_size=8, loss='l1Loss', save_dir='res-fc')
 # train('dense-fc', 'Make3D', 5, batch_size=16, loss='l1Loss', save_dir='dense-fc')
 # train('dense-cat', 'Make3D', 20, batch_size=8, loss='l1Loss', save_dir='dense-cat')
-train('dense-fcn', 'Make3D', 20, batch_size=8, loss='l2Loss', save_dir='dense-fcn/l2Loss', load_model=None, start_index=0, lr=1e-4)
+
+train('dense-fcn', 'Make3D', 20, batch_size=8, loss='berhuLoss', 
+      save_dir='dense-fcn/berhu', load_model=None,
+      lr=1e-2, op='adam', start_index=0)
+
+# train('dense-fcn', 'Make3D', 10, batch_size=8, loss='l1Loss', 
+#       save_dir='dense-fcn/aver_pool', load_model='dense-fcn/aver_pool/12.pkl',
+#       lr=1e-2 / 2, op='adam', start_index=20)
+
+# train('dense-fcn', 'Make3D', 10, batch_size=8, loss='l1Loss', 
+#       save_dir='dense-fcn/aver_pool', load_model='dense-fcn/aver_pool/29.pkl',
+#       lr=1e-2 / 4, op='adam', start_index=30)
+
+# train('dense-fcn', 'Make3D', 10, batch_size=8, loss='l1Loss', 
+#       save_dir='dense-fcn/adam_new', load_model='dense-fcn/adam_new/19.pkl',
+#       lr=1e-2 / 2, op='adam', start_index=20)
+
+# train('dense-fcn', 'Make3D', 10, batch_size=8, loss='l1Loss', 
+#       save_dir='dense-fcn/adam_new', load_model='dense-fcn/adam_new/29.pkl',
+#       lr=1e-2 / 4, op='adam', start_index=30)
 
 # test('Make3D', 'dense-cat', 'dense-cat/9.pkl', 4)
-# for i in range(28, 39):
+# for i in range(30):
+#     test('Make3D', 'dense-fcn', 'dense-fcn/adam/{}.pkl'.format(i), 4)
 #     test('Make3D', 'dense-fcn', 'dense-fcn/{}.pkl'.format(i), 4)
+#     print (i)
 
-# visual_random('dense-cat', 'Make3D', 'dense-fcn/30.pkl', 1)
+# visual_random('dense-fcn', 'Make3D', 'dense-fcn/aver_pool/39.pkl', 10)
 # visual_random('dense-fcn', 'Make3D', 'dense-fcn/30.pkl', 5)

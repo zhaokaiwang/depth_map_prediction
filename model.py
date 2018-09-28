@@ -10,6 +10,7 @@ def get_optim(model, op, lr):
         return optim    
     elif op is 'adam':
         optim = torch.optim.Adam(model.parameters(), lr=lr)
+        return optim
     elif op is 'rmsprop':
         optim = torch.optim.RMSprop(model.parameters(), lr=lr)
         return optim 

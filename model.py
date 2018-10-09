@@ -1,6 +1,6 @@
 import numpy as np 
 import torch 
-from densenet import densenet_cat, densenet_fc, densenet_fcn
+from densenet import densenet_cat, densenet_fc, densenet_fcn, densenet_fcn_final
 from resnet import resnet_fc
 
 
@@ -17,7 +17,7 @@ def get_optim(model, op, lr):
     pass 
 
 def get_model(mode, dataset, source):
-    if mode not in ['res-fc', 'dense-fc', 'dense-fcn', 'dense-cat']:
+    if mode not in ['res-fc', 'dense-fc', 'dense-fcn', 'dense-cat', 'dense-final']:
         raise NotImplementedError('mode {} is not supported'.format(mode))
     
     if mode == 'res-fc':
@@ -31,7 +31,11 @@ def get_model(mode, dataset, source):
     elif mode == 'dense-fcn':
         return densenet_fcn(dataset, growth_rate=16, block_config=[4, 5, 7, 10, 12], last_layer=15,
                  num_init_features=48, bn_size=4, drop_rate=0.2, efficient=True,
-                 constrain=False, source=True)
+                 constrain=False, source=source)
+    elif mode == 'dense-final':
+        return densenet_fcn_final(dataset, growth_rate=16, block_config=[4, 5, 7, 10, 12], last_layer=15,
+                 num_init_features=48, bn_size=4, drop_rate=0.2, efficient=True,
+                 constrain=False, source=source)
     
 
 def main():

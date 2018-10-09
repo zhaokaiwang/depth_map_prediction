@@ -469,7 +469,7 @@ class densenet_fcn_final(nn.Module):
 
         #Reverse dense block and tranistion up 
         for i in range(len(self.block_config) - 1):
-            self.add_module('deDenseBlock{}'.format(i), _DenseBlock_last(self.block_config[i + 1], self.features[i] + self.block_config[i] * self.growth_rate, self.bn_size, self.growth_rate, self.drop_rate, self.efficient))
+            self.add_module('deDenseBlock{}'.format(i), _DenseBlock_last(self.block_config[i + 1], self.features[i] + self.block_config[i] * self.growth_rate + 1, self.bn_size, self.growth_rate, self.drop_rate, self.efficient))
             
             in_h, in_w = self.resolution[i][0], self.resolution[i][1]
             out_h, out_w = self.resolution[i + 1][0], self.resolution[i + 1][1]
@@ -486,10 +486,11 @@ class densenet_fcn_final(nn.Module):
             self.add_module('predict{}'.format(i), nn.Conv2d(self.block_config[i] * self.growth_rate + self.features[i] , 1, 3, stride=1, bias=False, padding=1))
         
         self.last_conv = nn.Conv2d(self.block_config[-1] * self.growth_rate, 1, 1, stride=1, bias=False)
+
         self.upsample_source = nn.Upsample(size=[self.source_height, self.source_weight], mode='bilinear', align_corners=True)
         self.upsample_input = nn.Upsample(size=[self.input_height, self.source_weight], mode='bilinear', align_corners=True)
 
-        self.add_module('predict', nn.Conv2d(5, 1, 1, bias=False))
+        self.add_module('predict', nn.Conv2d(6, 1, 1, bias=False))
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight,  nonlinearity='relu')
@@ -529,35 +530,40 @@ class densenet_fcn_final(nn.Module):
         output = self.transitionUp0(output)
         output = torch.cat([output, cat4], 1)
         predict0 = self.predict0(output)
+        output = torch.cat([output, predict0], 1)
         output = self.deDenseBlock0(output)
 
         output = self.transitionUp1(output)
         output = torch.cat([output, cat3], 1)
         predict1 = self.predict1(output)
+        output = torch.cat([output, predict1], 1)
         output = self.deDenseBlock1(output)
 
         output = self.transitionUp2(output)
         output = torch.cat([output, cat2], 1)
         predict2 = self.predict2(output)
+        output = torch.cat([output, predict2], 1)
         output = self.deDenseBlock2(output)
         
         output = self.transitionUp3(output)
         output = torch.cat([output, cat1], 1)
         predict3 = self.predict3(output)
+        output = torch.cat([output, predict3], 1)
         output = self.deDenseBlock3(output)
         
         output = self.transitionUp4(output)
         output = torch.cat([output, cat0], 1)
         predict4 = self.predict4(output)
+        output = torch.cat([output, predict4], 1)
         output = self.deDenseBlock4(output) 
 
         output = self.last_conv(output)
-
+          
         predict0 = self.upsample_input(predict0)
         predict1 = self.upsample_input(predict1)
         predict2 = self.upsample_input(predict2)
         predict3 = self.upsample_input(predict3)
-        predict4 = self.upsample_input(predict4)
+
         output = torch.cat([predict0, predict1, predict2, predict3, predict4, output], 1)
         output = self.predict(output)
           

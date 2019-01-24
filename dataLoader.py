@@ -8,23 +8,23 @@ import shutil
 import matplotlib.pyplot as plt
 
 def augment_nyuv2_data(image_dir, depth_dir, dest_image_dir, dest_depth_dir):
-    train_count = 10314
-    index = 35360
+    train_count = 50363
+    index = 38810
 
-    repeat_times = 4
-    for i in range(7944, train_count):
+    repeat_times = 1
+    for i in range(38812, train_count):
         image = cv2.imread(os.path.join(image_dir, '{}.jpg'.format(i)))
         depth = sio.loadmat(os.path.join(depth_dir, '{}.mat'.format(i)))
         depth = depth['imgDepth2'].astype(np.float32)
 
         # Repeat serverl times
         for _ in range(repeat_times):
-            aug_img, aug_depth = augment(image, depth)
+            #aug_img, aug_depth = augment(image, depth)
             dest_image = os.path.join(dest_image_dir, '{}.jpg'.format(index))
             dest_depth = os.path.join(dest_depth_dir, '{}'.format(index))
 
-            cv2.imwrite(dest_image, aug_img)
-            np.save(dest_depth, aug_depth)
+            cv2.imwrite(dest_image, image)
+            np.save(dest_depth, depth)
     
             index = index + 1
         print(i)
@@ -47,8 +47,8 @@ def get_train_data(dataset, l):
         image = cv2.imread(image_path)
         depth = np.load(depth_path)
         
-        image = cv2.resize(image, (input_weight, input_height))
-        depth = cv2.resize(depth, (input_weight, input_height))
+        # image = cv2.resize(image, (input_weight, input_height))
+        # depth = cv2.resize(depth, (input_weight, input_height))
         
         # if dataset is 'Make3D':
         #     depth[depth < 0.] = 0.
@@ -87,6 +87,34 @@ def get_test_data(dataset, start_index, batch_size):
         depths[i] = depth
     
     return images, depths
+
+def get_test_data_with_index(dataset, l):
+    image_dir = get_config(dataset, 'test_image_dir')
+    depth_dir = get_config(dataset, 'test_depth_dir')
+    input_height = int(get_config(dataset, 'input_height'))
+    input_weight = int(get_config(dataset, 'input_weight'))
+
+    count = len(l)
+
+    images = np.zeros([count, 3, input_height, input_weight], dtype=np.uint8) 
+    depths = np.zeros([count, input_height, input_weight], dtype=np.float32)
+    
+    for i in range(len(l)):
+        image_path = os.path.join(image_dir, '{}.jpg'.format(l[i]))
+        depth_path = os.path.join(depth_dir, '{}.npy'.format(l[i]))
+
+        image = cv2.imread(image_path)
+        depth = np.load(depth_path)
+        
+        image = cv2.resize(image, (input_weight, input_height))
+        depth = cv2.resize(depth, (input_weight, input_height))
+
+        image = np.transpose(image,(2, 0, 1))
+        images[i] = image
+        depths[i] = depth
+    
+    return images, depths
+
 
 def extract_nyuv2_test_data(image_mat, depth_mat, dest_image_dir, dest_depth_dir):
     images = sio.loadmat(image_mat)
@@ -191,17 +219,87 @@ def extract_make3d_test_data(image_dir, depth_dir, dest_dir):
         np.save(dest_depth, depth)
         print (i)
 
+def check_file():
+    for i in range(50363):
+        path = os.path.join(r'train_data\nyuv2\depth', '{}.npy'.format(i))
+        if os.path.exists(path) is False:
+            print (path)
+
+def move_file():
+    index = 0
+    input_weight = int(get_config('NyuV2', 'input_weight'))
+    input_height = int(get_config('NyuV2', 'input_height'))
+    for i in range(50359):
+        depth_path = os.path.join(r'D:\nyuv2\train_data\nyuv2\depth', '{}.npy'.format(i))
+        image_path = os.path.join(r'D:\nyuv2\train_data\nyuv2\image', '{}.jpg'.format(i))
+
+        image = cv2.imread(image_path)
+        depth = np.load(depth_path)
+
+        image_save = image[49:480-13, 42:640-42]
+        depth_save = depth[49:480-13, 42:640-42]
+
+        image = cv2.resize(image_save, (input_weight, input_height))
+        depth = cv2.resize(depth_save, (input_weight, input_height))
+
+        # plt.figure()
+        # plt.subplot(2, 2, 1)
+        # plt.imshow(image)
+        # plt.subplot(2, 2, 2)
+        # plt.imshow(depth)
+        # plt.subplot(2, 2, 3)
+        # plt.imshow(image_save)
+        # plt.subplot(2, 2, 4)
+        # plt.imshow(depth_save)
+        # plt.show()
+       
+        dest_depth = os.path.join(r'train_data\nyuv2\depth', '{}.npy'.format(index))
+        dest_image = os.path.join(r'train_data\nyuv2\image', '{}.jpg'.format(index))
+        cv2.imwrite(dest_image, image)
+        np.save(dest_depth, depth)
+        index += 1
+
+        if i % 1000 == 0:
+            print (i)
+
+def valid_range():
+    left, right, top, bottem = 0, 0, 0, 0 
+    for i in range(50359):
+        depth_path = os.path.join(r'D:\nyuv2\train_data\nyuv2\depth_temp', '{}.npy'.format(i))
+        depth = np.load(depth_path)
+
+        temp = depth > 0
+        left += np.mean(np.argmax(temp, axis=1))
+        right += np.mean(np.argmax(np.fliplr(temp), axis=1))
+
+        top +=  np.mean(np.argmax(temp, axis=0))
+        bottem += np.mean(np.argmax(temp[::-1], axis=0))
+
+        if i % 1000 == 0:
+            print(i)
+    left = left / 50363
+    right = right / 50363
+    top = top / 50363
+    bottem = bottem / 50363
+    print (left, right, top, bottem)
+    #42, 42, 49, 13
+
+
 def main():
     image_dir = r'd:\nyuv2\data\image'
     depth_dir = r'd:\nyuv2\data\depth'
     dest_image_dir = r'D:\nyuv2\train_data\nyuv2\image' 
     dest_depth_dir = r'D:\nyuv2\train_data\nyuv2\depth'
 
+    
+    #check_file()
+    #valid_range()
+    #move_file()
     #images, depths = get_train_data('NyuV2', [1, 2, 4, 5, 6])
-    #augment_nyuv2_data(image_dir, depth_dir, dest_image_dir, dest_depth_dir)
+    # augment_nyuv2_data(image_dir, depth_dir, dest_image_dir, dest_depth_dir)
     #extract_nyuv2_test_data('nyuv2/test_images.mat', 'nyuv2/test_depths.mat', 'nyuv2/test', 'nyuv2/test')
     #extract_make3d_train_data('make3d/Train400Img', 'make3d/Train400Depth', 'make3d/train', 'make3d/train')
-    augment_make3d_train_data('make3d/train/', 'make3d/train/', 'make3d/train/temp')
+    #augment_make3d_train_data('make3d/train/', 'make3d/train/', 'make3d/train/temp')
     # extract_make3d_test_data('make3d/test', 'make3d/test', 'make3d/real_test')
 if __name__ == '__main__':
     main()

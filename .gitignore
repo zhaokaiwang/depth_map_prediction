@@ -8,3 +8,7 @@ efficient_densenet_pytorch-master/
 .vscode/
 __pycache__/
 dense-final/
+train_data/
+*.mat 
+result/
+*.npy 

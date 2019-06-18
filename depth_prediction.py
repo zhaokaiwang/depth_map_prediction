@@ -10,9 +10,10 @@ from dataLoader import get_train_data, get_test_data, get_test_data_with_index
 import os 
 import math
 from image_utils import gradient
-from gan import Discriminator, WganDiscriminator, calcGradientPenalty
+from gan import Discriminator, WganDiscriminator
 import torchvision
 from scipy import io
+from gan_train import trainWithGan, train_with_perceptual_loss, trainWithWganGp
 
 def write_result(dataset, mode, load_model, index):
     device = torch.device('cuda:0')
@@ -39,7 +40,6 @@ def visual_and_make_grid(dataset, mode_list, load_model_list, image_count=5):
     device = torch.device('cuda:0')
     test_count = int(get_config(dataset, 'test_count'))
     indics = np.random.random_integers(1, test_count, size = image_count)
-    indics = [1, 10, 100, 1000]
     images, depths = get_test_data_with_index(dataset, indics)
 
     images = torch.from_numpy(images)
@@ -170,7 +170,8 @@ def visual_list(dataset, mode, load_model, index):
 
 
 def train(mode, dataset, epochs, loss='l1Loss', op='momentum', lr=1e-2, batch_size=4,
-          load_model=None, save_dir=None, source=False, start_index = 0, with_grad = False):
+          load_model=None, save_dir=None, source=False, start_index = 0, with_grad = False,
+          perceptualLoss = False):
     device = torch.device('cuda:0')
     # Get model 
     model = get_model(mode, dataset, source)
@@ -213,6 +214,7 @@ def train(mode, dataset, epochs, loss='l1Loss', op='momentum', lr=1e-2, batch_si
 
         loss = torch.tensor([0.0]).float().to(device)
 
+
         if isinstance(predict, list):
             for index in range(len(predict)):
                 loss = loss + loss_fn(predict[index], depths, mask)
@@ -229,7 +231,7 @@ def train(mode, dataset, epochs, loss='l1Loss', op='momentum', lr=1e-2, batch_si
 
         optim.step()
 
-        if i % 100 == 0:
+        if i % 10 == 0:
             print (i, loss.cpu().detach().numpy())
 
         if i % epoch == epoch - 1:
@@ -243,7 +245,8 @@ def test(dataset, mode,  load_model, batch_size=4):
     model = get_model(mode, dataset, source=True)
     model.to(device)
 
-    model.load_state_dict(torch.load(load_model))
+    tmp = torch.load(load_model)
+    model.load_state_dict(tmp)
     model.eval()
 
     temp = test_count // batch_size
@@ -336,213 +339,6 @@ def test(dataset, mode,  load_model, batch_size=4):
     print (thrLoss, absLoss, sqrLoss, rmsLinLoss, rmsLogLoss, log10Loss) 
     pass
 
-def trainWithGan(mode, dataset, epochs, loss='l1Loss', op='momentum', lr=1e-2, batch_size=4,
-                 load_gen_model=None, load_dis_model=None, save_dir=None, source=False, start_index = 0):
-    critic = 5
-    device = torch.device('cuda:0')
-    # Get model 
-    modelG = get_model(mode, dataset, source)
-    modelG.to(device)
-
-    modelD = Discriminator()
-    modelD.to(device)
-    
-    error_list = []
-    #Check if there is trained model
-    if load_gen_model is not None:
-        modelG.load_state_dict(torch.load(load_gen_model))
-    
-    if load_dis_model is not None:
-        modelD.load_state_dict(torch.load(load_dis_model))
-
-    modelG.train()
-    modelD.train()
-
-    # traditional loss function 
-    loss_normal = get_loss(loss)
-    loss_normal.to(device)
-
-    # loss in Gen and Dis 
-    loss_G = nn.BCELoss()
-    loss_D = nn.BCELoss()
-    loss_G.to(device)
-    loss_D.to(device)
-
-    optimD = torch.optim.Adam(modelD.parameters(), lr=1e-4,)
-    optimG = get_optim(modelG, op, lr)
-
-    train_count = int(get_config(dataset,  'train_count'))
-    total_it = math.ceil(train_count * epochs / batch_size)
-
-    epoch = train_count // batch_size
-
-    if save_dir is not None:
-        if os.path.exists(save_dir) is False:
-            os.mkdir(save_dir)
-
-    real_label = 1
-    fake_label = 0
-
-    for i in range(total_it):
-        # update the parameters in the DIS
-        for _ in range(critic):
-            batch_list = list(np.random.randint(1, train_count, size=[batch_size]))
-
-            images, depths = get_train_data(dataset, batch_list)
-            images = torch.from_numpy(images).cuda().float()
-            depths = torch.from_numpy(depths).cuda()
-
-            mask = torch.tensor(depths)
-            if dataset is 'Make3D':
-                mask = (depths > 0.0) & (depths < 70.0)
-            elif dataset is 'NyuV2':
-                mask = (depths > 0.0) & (depths < 10.0)
-
-            label = torch.full((batch_size, ), fake_label, device=device)
-            modelD.zero_grad()
-            
-            #Gen the depth predicticon and this is for fake lable
-            predict = modelG(images)
-            predict_temp = torch.unsqueeze(predict, 1)
-
-            output = modelD(predict_temp.detach())
-            output = output.view(batch_size, -1)
-            errD_fake = loss_D(output, label)
-            errD_fake.backward()
-
-            output_real = modelD(torch.unsqueeze(depths, 1))
-            output_real = output_real.view(batch_size, -1)
-            label.fill_(real_label)
-            errD_real = loss_D(output_real, label)
-            errD_real.backward()  
-
-            if i % 100 == 0:
-                errD = errD_real + errD_fake
-                print ('In iter {}, loss in the dis is {}'.format(i, errD.item()))
-            optimD.step()
-
-        #updata the parameters in the geneotator
-        batch_list = list(np.random.randint(1, train_count, size=[batch_size]))
-        images, depths = get_train_data(dataset, batch_list)
-        images = torch.from_numpy(images).cuda().float()
-        depths = torch.from_numpy(depths).cuda()
-
-        mask = torch.tensor(depths)
-        if dataset is 'Make3D':
-            mask = (depths > 0.0) & (depths < 70.0)
-        elif dataset is 'NyuV2':
-            mask = (depths > 0.0) & (depths < 10.0)
-
-        modelG.zero_grad()
-        predict = modelG(images)
-        label.fill_(real_label)
-
-        output = modelD(predict)
-        g_loss = loss_G(output, label)
-        g_normal_loss = loss_normal(predict, depths, mask)   
-        errG = 1e-3 * g_loss + g_normal_loss
-
-        errG.backward()
-        optimG.step()
-
-        if i % 100 == 0:
-            print ('In iter {}, gene loss is {}, normal loss is {}'.format(i, g_loss.item(), g_normal_loss.item()))
-            print (i, g_loss.cpu().detach().numpy(), g_normal_loss.cpu().detach().numpy())
-
-        if i % epoch == epoch - 1:
-            torch.save(modelG.state_dict(), '{}/{}.pkl'.format(save_dir,start_index + i // epoch))
-    pass
-
-
-def trainWithWganGp(mode, dataset, epochs, loss='l1Loss', op='momentum', lr=1e-2, batch_size=4,
-                 load_gen_model=None, load_dis_model=None, save_dir=None, source=False, start_index = 0):
-
-    device = torch.device('cuda:0')
-    # Get model 
-    modelG = get_model(mode, dataset, source)
-    modelG.to(device)
-
-    modelD = WganDiscriminator()
-    modelD.to(device)
-    
-    #Check if there is trained model
-    if load_gen_model is not None:
-        modelG.load_state_dict(torch.load(load_gen_model))
-    
-    if load_dis_model is not None:
-        modelD.load_state_dict(torch.load(load_dis_model))
-
-    modelG.train()
-    modelD.train()
-
-    # traditional loss function 
-    loss_normal = get_loss(loss)
-    loss_normal.to(device)
-
-    # loss in Gen and Dis 
-    optimD = torch.optim.Adam(modelD.parameters(), lr=5e-5, betas=(0.5, 0.9))
-    optimG = get_optim(modelG, op, lr)
-
-    train_count = int(get_config(dataset,  'train_count'))
-    total_it = math.ceil(train_count * epochs / batch_size)
-
-    epoch = train_count // batch_size
-
-    if save_dir is not None:
-        if os.path.exists(save_dir) is False:
-            os.mkdir(save_dir)
-
-    for i in range(total_it):
-        batch_list = list(np.random.randint(1, train_count, size=[batch_size]))
-
-        images, depths = get_train_data(dataset, batch_list)
-        images = torch.from_numpy(images).cuda().float()
-        depths = torch.from_numpy(depths).cuda()
-
-        mask = torch.tensor(depths)
-        if dataset is 'Make3D':
-            mask = (depths > 0.0) & (depths < 70.0)
-        elif dataset is 'NyuV2':
-            mask = (depths > 0.0) & (depths < 10.0)
-
-        modelD.zero_grad()
-        
-        #Gen the depth predicticon and this is for fake lable
-        predict = modelG(images)
-        predict_temp = torch.unsqueeze(predict, 1)
-
-        output = modelD(predict_temp.detach())
-        output_fake = output.view(batch_size, -1)
-
-        output_real = modelD(torch.unsqueeze(depths, 1))
-        output_real = output_real.view(batch_size, -1)
-        
-        wganDistance = (output_fake - output_real).mean() 
-        gradientPenalty = calcGradientPenalty(modelD, depths, predict_temp.detach())
-
-        errD = wganDistance + 10 * gradientPenalty
-        errD.backward()
-        optimD.step()
-
-        #updata the parameters in the geneotator
-        modelG.zero_grad()
-
-        output = modelD(predict_temp)
-        g_loss = -output.mean()
-        g_normal_loss = loss_normal(predict, depths, mask)   
-        errG = 1e-3 * g_loss + g_normal_loss
-
-        errG.backward()
-        optimG.step()
-
-        if i % 100 == 0:
-            print (i, g_loss.cpu().detach().numpy(), g_normal_loss.cpu().detach().numpy())
-
-        if i % epoch == epoch - 1:
-            torch.save(modelG.state_dict(), 'gen{}/{}.pkl'.format(save_dir,start_index + i // epoch))
-            torch.save(modelD.state_dict(), 'dis{}/{}.pkl'.format(save_dir,start_index + i // epoch))
-    pass
-
 def write_all_result(dataset, mode, load_model, prefix):
     device = torch.device('cuda:0')
     test_count = int(get_config(dataset, 'test_count'))
@@ -580,43 +376,42 @@ def write_all_result(dataset, mode, load_model, prefix):
     # io.savemat('{}_image.mat'.format(prefix), {'image': image_set})
     # io.savemat('{}_depth.mat'.format(prefix), {'pred': depths})
 
-# trainWithGan('resnet_deconv_cat', 'NyuV2', 10, batch_size=8, loss='l1Loss', 
-#       save_dir=r'D:\nyuv2\model\nyuv2\res_deconv_cat_l1_gan', 
-#       lr=1e-3 , op='adam', start_index=0)
+# trainWithWganGp('resnet_upsample', 'ganWithoutBN', 'NyuV2', 10, batch_size=8, loss='l1Loss', 
+#       save_dir=r'D:\nyuv2\model\nyuv2\resnet_upsample_wgan_gp', 
+#       lr=1e-2 , op='momentum', start_index=0)
 
-# trainWithGan('resnet_deconv_cat', 'Make3D', 20, batch_size=8, loss='l1Loss', 
-#       save_dir=r'D:\nyuv2\model\make3d\res_deconv_cat_l1_gan', load_dis_model=None, 
-#       load_gen_model=None, lr=1e-2 , op='momentum', start_index=0)
+trainWithWganGp('resnet_deconv_cat', 'ganWithoutBN', 'Make3D', 10, batch_size=8, loss='l1Loss', 
+      save_dir=r'D:\nyuv2\model\make3d\res_deconv_cat_l1_raw_gan', load_dis_model=None, 
+      load_gen_model=None, lr=1e-2 , op='momentum', start_index=0)
 
-# train('resnet_deconv_cat', 'NyuV2', 10, batch_size=8, loss='l1Loss', 
-#       save_dir=r'D:\nyuv2\model\nyuv2\res_deconv_cat_new', load_model=None,
+# train('resnet_upsample', 'Make3D', 20, batch_size=16, loss='l1Loss', 
+#       save_dir=r'D:\nyuv2\model\make3d\resnet_upsample', load_model=None,
 #       lr=1e-2, op='momentum', start_index=0, with_grad=False)     
 
-# test('NyuV2', 'resnet_deconv_cat', r'D:\nyuv2\model\nyuv2\res_deconv_cat_l2\9.pkl', 4)
-# test('NyuV2', 'resnet_deconv_cat', r'D:\nyuv2\model\nyuv2\res_deconv_cat_berhu\8.pkl', 4)
-# test('NyuV2', 'resnet_deconv_cat', r'D:\nyuv2\model\nyuv2\res_deconv_cat_grad\7.pkl', 4)
-# test('NyuV2', 'res-fc', r'D:\nyuv2\model\nyuv2\res_fc\5.pkl', 4)
+# train_with_perceptual_loss('resnet_deconv_cat', 'Make3D', 20, batch_size=8, loss='l1Loss', 
+#       save_dir=r'D:\nyuv2\model\make3d\res_deconv_cat_l1_perceptual_relu1', 
+#       lr=1e-2 , op='momentum', start_index=0, load_model=None)
+
 # for i in range(10):
 #     print (i)
-    
-    #test('NyuV2', 'resnet_deconv', r'D:\nyuv2\model\nyuv2\res_deconv\{}.pkl'.format(i), 4)
-    # test('NyuV2', 'resnet_deconv_cat', r'D:\nyuv2\model\nyuv2\res_deconv_cat_berhu\{}.pkl'.format(i), 4)
-    # test('NyuV2', 'resnet_deconv_cat', r'D:\nyuv2\model\nyuv2\res_deconv_cat_l2\{}.pkl'.format(i), 4)
+#     test('Make3D', 'resnet_upsample', r'D:\nyuv2\model\make3d\resnet_upsample\{}.pkl'.format(i), 4)
+#     test('Make3D', 'resnet_upsample', r'D:\nyuv2\model\make3d\resnet_upsample_wgan_gp\gen{}.pkl'.format(i), 16)
+    # test('NyuV2', 'resnet_upsample', r'D:\nyuv2\model\nyuv2\resnet_upsample_wgan_gp\gen{}.pkl'.format(i), 4)
+    # test('NyuV2', 'resnet_deconv_cat', r'D:\nyuv2\model\nyuv2\res_deconv_cat\{}.pkl'.format(i), 4)
     # test('NyuV2', 'resnet_deconv_cat', r'D:\nyuv2\model\nyuv2\res_deconv_cat_grad\{}.pkl'.format(i), 4)
     # test('NyuV2', 'resnet_deconv_cat', r'D:\nyuv2\model\nyuv2\res_deconv_cat_new\{}.pkl'.format(i), 4)
+    # test('Make3D', 'resnet_deconv_cat', r'D:\nyuv2\model\make3d\res_deconv_cat_l1_perceptual_relu1\{}.pkl'.format(i), 4)
     # test('Make3D', 'resnet_deconv_cat', r'D:\nyuv2\model\make3d\res_deconv_cat\{}.pkl'.format(i), 4)
-    # test('Make3D', 'resnet_deconv_cat', r'D:\nyuv2\model\make3d\res_deconv_cat_grad\{}.pkl'.format(i), 4)
 #     test('Make3D', 'resnet_deconv', r'D:\nyuv2\model\make3d\res_deconv\{}.pkl'.format(i), 4)
 
-# model_list = ['resnet_deconv_cat']
-# load_model_list = [r'D:\nyuv2\model\make3d\res_deconv_cat\19.pkl',
-#      r'D:\nyuv2\model\make3d\res_deconv_cat_grad\19.pkl']
+# model_list = ['resnet_upsample', 'resnet_upsample']
+# load_model_list = [r'D:\nyuv2\model\make3d\resnet_upsample\8.pkl',
+#      r'D:\nyuv2\model\make3d\resnet_upsample_wgan_gp\gen8.pkl']
 # while 1:
 #     visual_and_make_grid('Make3D', model_list, load_model_list, image_count=2)
-#visual_random('resnet_deconv_sum', 'Make3D', r'D:\nyuv2\model\make3d\res_deconv_sum\9.pkl', 5)
+visual_random('resnet_deconv_cat', 'Make3D', r'D:\nyuv2\model\make3d\res_deconv_cat_l1_raw_gan\gen2.pkl', 5)
+
 #write_result('NyuV2', 'resnet_deconv_cat', r'D:\nyuv2\model\nyuv2\res_deconv_cat\7.pkl', 1)
 
 #io.savemat('depth.mat', {'depth':data})
 # write_all_result('NyuV2', 'res-fc', r'D:\nyuv2\model\nyuv2\res_fc\5.pkl', 'nyuv2_fc')
-laina = np.load('final.npy').astype(np.float32)
-io.savemat('laina.mat', {'pred':laina})

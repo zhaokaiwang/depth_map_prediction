@@ -1,7 +1,7 @@
 import numpy as np 
 import torch 
 from densenet import densenet_cat, densenet_fc, densenet_fcn, densenet_fcn_final
-from resnet import resnet_fc, resnet_deconv, resnet_deconv_cat, resnet_final, resnet_deconv_sum
+from resnet import resnet_fc, resnet_deconv, resnet_deconv_cat, resnet_final, resnet_deconv_sum, resnet_upsample
 
 
 def get_optim(model, op, lr):
@@ -18,7 +18,7 @@ def get_optim(model, op, lr):
 
 def get_model(mode, dataset, source):
     if mode not in ['res-fc', 'dense-fc', 'dense-fcn', 'dense-cat', 'dense-final',
-                     'resnet_deconv', 'resnet_deconv_cat', 'res-final', 'resnet_deconv_sum']:
+                     'resnet_deconv', 'resnet_deconv_cat', 'res-final', 'resnet_deconv_sum', 'resnet_upsample']:
         raise NotImplementedError('mode {} is not supported'.format(mode))
     
     if mode == 'res-fc':
@@ -45,6 +45,8 @@ def get_model(mode, dataset, source):
         return resnet_final(dataset,  source=source)
     elif mode == 'resnet_deconv_sum':
         return resnet_deconv_sum(dataset, source=source)
+    elif mode == 'resnet_upsample':
+        return resnet_upsample(dataset, source=source)
     
 
 def main():

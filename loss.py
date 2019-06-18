@@ -1,6 +1,10 @@
 import torch 
 import torch.nn as nn 
 import numpy as np 
+import copy
+import torch.nn.functional as F
+import torchvision
+
 
 class l1Loss(nn.Module):
     def __init__(self):
@@ -165,6 +169,111 @@ class log10Loss(nn.Module):
         return torch.sum(torch.abs(temp))
 
 
+class Normalization(nn.Module):
+    def __init__(self, mean, std):
+        super(Normalization, self).__init__()
+        self.mean = torch.tensor(mean).view(-1, 1, 1)
+        self.std = torch.tensor(std).view(-1, 1, 1)
+
+    def forward(self, input):
+        return (input - self.mean) / self.std
+
+class ContentLoss(nn.Module):
+    def __init__(self, target):
+        super(ContentLoss, self).__init__()
+        self.target = target.detach()
+    
+    def forward(self, input):
+        self.loss = F.mse_loss(input, self.target)
+        return input
+    
+def gram_matrix(input):
+    b, c, h, w = input.size()
+    features = input.view(b * c, h * w)
+    G = torch.mm(features, features.t())
+    return G.div(b * c * h * w)
+
+class SytleLoss(nn.Module):
+    def __init__(self, target):
+        super(SytleLoss, self).__init__()
+        self.target = gram_matrix(target).detach()
+    
+    def forward(self, input):
+        G = gram_matrix(input)
+        self.loss = F.mse_loss(G, self.target)
+        return input
+
+def perceptual_loss(cnn, noramlization_mean, noramlization_std, 
+                    style_image, content_image, 
+                    content_layers,
+                    style_layers):
+    """Get the perceptual loss of images,
+    Parameters:
+    cnn: the convolutional neural networks to extract features,
+    normalization_mean: the input image means in vgg networks
+    normalization_std: the input iamge std in vgg networks
+    style_image: the style images to transfer 
+    content_image: the content images to keep
+    content_layers: the layers to extract features 
+    style_layers: the layers to extract featurres
+    """
+    
+    cnn = copy.deepcopy(cnn)
+
+    noramlization = Normalization(noramlization_mean, noramlization_std)
+    
+    content_losses = []
+    style_losses = []
+
+    model = nn.Sequential(noramlization)
+
+    i = 0
+    for layer in cnn.children():
+        if isinstance(layer, nn.Conv2d):
+            i += 1
+            name = 'conv_{}'.format(i)
+        elif isinstance(layer, nn.ReLU):
+            name = 'relu_{}'.format(i)
+            layer = nn.ReLU(inplace=False)
+        elif isinstance(layer, nn.BatchNorm2d):
+            name = 'bn_{}'.format(i)
+        elif isinstance(layer, nn.MaxPool2d):
+            name = 'pool_{}'.format(i)
+        else:
+            raise RuntimeError('Unrecognized layer: {}'.format(layer.__class__.__name__))
+        
+        model.add_module(name, layer)
+    
+        if name in content_layers:
+            target = model(content_image).detach()
+            content_loss = ContentLoss(target)
+            model.add_module("content_loss_{}".format(i), content_loss)
+            content_losses.append(content_loss)
+        
+        if name in style_layers:
+            target = model(style_image).detach()
+            style_loss = SytleLoss(target)
+            model.add_module('style_loss_{}'.format(i), style_loss)
+            style_losses.append(style_loss)
+
+    for i in range(len(model) - 1, -1, -1):
+        if isinstance(model[i], ContentLoss) or isinstance(model[i], SytleLoss):
+            break
+    model = model[:(i + 1)]
+
+    return model, content_losses, style_losses
+
+def get_perceptual_loss(cnn, content_images, style_images):
+    device = torch.device('cuda:0')
+    content_layers_default = ['relu_1']
+    style_layers_default = []
+    #style_layers_default = ['conv_1', 'conv_2', 'conv_3', 'conv_4', 'conv_5']
+
+    cnn_normalization_mean = torch.tensor([0.485, 0.456, 0.406]).to(device)
+    cnn_normalization_std = torch.tensor([0.229, 0.224, 0.225]).to(device)
+    return perceptual_loss(cnn, cnn_normalization_mean, cnn_normalization_std,
+                           style_images, content_images, content_layers_default,
+                           style_layers_default)
 
 def error_mertic(predict, target):
     device = torch.device('cuda:0')
@@ -186,7 +295,8 @@ def error_mertic(predict, target):
     return thrLoss, absLoss, sqrLoss, rmsLinLoss, rmsLogLoss, log10
 
 def get_loss(loss):
-    if loss not in ['l1Loss', 'l2Loss', 'berhuLoss', 'l1l2Loss', 'huberLoss', 'smoothL1']:
+    if loss not in ['l1Loss', 'l2Loss', 'berhuLoss', 'l1l2Loss',
+                    'huberLoss', 'smoothL1', 'perceptualLoss']:
         raise NotImplementedError('loss {} has not been supported'.format(loss))
 
     if loss is 'l1Loss':
@@ -201,6 +311,8 @@ def get_loss(loss):
         return huberLoss()
     elif loss is 'smoothL1':
         return smoothL1Loss()
+    elif loss is 'perceptualLoss':
+        return get_perceptual_loss
 
 
 def main():

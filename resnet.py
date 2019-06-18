@@ -10,7 +10,7 @@ class resnet_fc(nn.Module):
         super(resnet_fc, self).__init__()
         self.source = source
 
-        self.model = torchvision.models.resnet50(pretrained=True)
+        self.model = torchvision.models.resnet50(pretrained=False)
 
         #Read the config file and the input and source resolution
         self.input_height = int(get_config(dataset, 'input_height'))
@@ -62,6 +62,22 @@ class _basic_block(nn.Sequential):
         self.add_module('bn', nn.BatchNorm2d(input_feature))
         self.add_module('relu', nn.ReLU(inplace=True))
         self.add_module('conv', nn.Conv2d(input_feature, input_feature, kernel_size=1, stride=1, bias=False))
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                m.weight.data.normal_(0, math.sqrt(2. / n))
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+
+class _conv_bn_relu(nn.Sequential):
+    def __init__(self, input_feature):
+        super(_conv_bn_relu, self).__init__()
+
+        self.add_module("conv", nn.Conv2d(input_feature, input_feature // 4, kernel_size=1, stride=1, bias=False))
+        self.add_module("bn", nn.BatchNorm2d(input_feature // 4))
+        self.add_module("relu", nn.ReLU(inplace=True))
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -144,6 +160,81 @@ class resnet_deconv_cat(nn.Module):
         output = torch.squeeze(output, dim=1)
         return output
 
+class resnet_upsample(nn.Module):
+    def __init__(self, dataset, source=False):
+        super(resnet_upsample, self).__init__()
+        self.source = source
+
+        self.model = torchvision.models.resnet50(pretrained=True)
+
+        #Read the config file and the input and source resolution
+        self.input_height = int(get_config(dataset, 'input_height'))
+        self.input_weight = int(get_config(dataset, 'input_weight'))
+
+        self.source_height = int(get_config(dataset, 'source_height'))
+        self.source_weight = int(get_config(dataset, 'source_weight'))
+
+        self.output_height = int(get_config(dataset, 'output_height'))
+        self.output_weight = int(get_config(dataset, 'output_weight'))
+
+        #default is the nearst upsample
+        self.upsample1 = nn.Upsample((self.input_height // 16, self.input_weight // 16), mode='bilinear', align_corners=True)
+        self.upsample2 = nn.Upsample((self.input_height // 8, self.input_weight // 8), mode='bilinear', align_corners=True)
+        self.upsample3 = nn.Upsample((self.input_height // 4, self.input_weight // 4), mode='bilinear', align_corners=True)
+        self.upsample4 = nn.Upsample((self.input_height // 2, self.input_weight // 2), mode='bilinear', align_corners=True)
+
+        for i in range(1, 5):
+            self.add_module('conv_{}'.format(i), _conv_bn_relu(int(2 * int(math.pow(2, i - 1)) * 256)))
+        
+        self.add_module("first_conv", nn.Conv2d(2048, 2048, kernel_size=1, padding=False, bias=False))
+        self.add_module('last_conv', nn.Conv2d(128, 1, kernel_size=1, padding=False, bias=False))
+
+        if self.source is False:
+            self.upsample = nn.Upsample((self.input_height, self.input_weight), mode='bilinear', align_corners=True)
+        else:
+            self.upsample = nn.Upsample((self.source_height, self.source_weight), mode='bilinear', align_corners=True)
+
+        nn.init.kaiming_normal_(self.last_conv.weight)
+
+    def forward(self, input):
+        output = self.model.conv1(input)
+        output = self.model.bn1(output)
+        output = self.model.relu(output)
+        output = self.model.maxpool(output)
+
+        output = self.model.layer1(output)
+        cat1 = output
+        output = self.model.layer2(output)
+        cat2 = output
+        output = self.model.layer3(output)
+        cat3 = output
+        output = self.model.layer4(output)
+        cat4 = output
+
+        #middle layer
+        output = self.first_conv(output)
+
+        output = torch.cat([output, cat4], 1)
+        output = self.upsample1(output)
+        output = self.conv_4(output)
+
+        output = torch.cat([output, cat3], 1)
+        output = self.upsample2(output)
+        output = self.conv_3(output)
+
+        output = torch.cat([output, cat2], 1)
+        output = self.upsample3(output)
+        output = self.conv_2(output)
+
+        output = torch.cat([output, cat1], 1)
+        output = self.upsample4(output)
+        output = self.conv_1(output)
+
+        output = self.last_conv(output)
+        output = self.upsample(output)
+
+        output = torch.squeeze(output, dim=1)
+        return output
 
 class resnet_final(nn.Module):
     def __init__(self, dataset, source=False):
@@ -347,13 +438,13 @@ class resnet_deconv_sum(nn.Module):
 
 def main():
     device = torch.device('cuda:0')
-    model = resnet_deconv_sum('NyuV2')
+    model = resnet_upsample('Make3D')
 
     model.to(device)
     input = np.random.randn(4, 3, 256 , 192).astype(np.float32)
     input = torch.from_numpy(input).cuda()
     output = model(input)
-    print (output)
+    print (output.shape)
 
     pass
 

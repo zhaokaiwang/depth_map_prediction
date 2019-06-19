@@ -165,7 +165,43 @@ class WganDiscriminator(nn.Module):
 
         return output 
 
-LAMBDA = 10.0
+# patchgan discriminator
+class pix2pixelGanDiscriminator(nn.Module):
+    def __init__(self, input_nc, ndf = 64, n_layers = 3, norm_layer = nn.BatchNorm2d):
+        super(pix2pixelGanDiscriminator, self).__init__()
+        use_bias = norm_layer != nn.BatchNorm2d
+
+        kw = 4
+        padw = 1
+        sequence = [nn.Conv2d(input_nc, ndf, kernel_size = 4, stride=2, padding=padw), nn.LeakyReLU(0.2, True)]
+        nf_mult = 1
+        nf_mult_prev = 1
+
+        for i in range(1, n_layers):
+            nf_mult_prev = nf_mult
+            nf_mult = min(2 ** i, 8) # max filter count less than 8
+            sequence += [
+                nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult, kernel_size = kw, stride = 2, padding=padw, bias=use_bias),
+                norm_layer(ndf * nf_mult),
+                nn.LeakyReLU(0.2, True)
+            ]
+
+        nf_mult_prev = nf_mult
+        nf_mult = min(2 ** n_layers, 8)
+
+        sequence += [
+            nn.Conv2d(ndf * nf_mult_prev, ndf * nf_mult, kernel_size = kw, stride = 1, padding=padw, bias=use_bias),
+                norm_layer(ndf * nf_mult),
+                nn.LeakyReLU(0.2, True)
+        ]
+        
+        # last conv
+        sequence += [nn.Conv2d(ndf * nf_mult, 1, kernel_size=kw, stride = 1, padding=padw)]
+        self.model = nn.Sequential(*sequence)
+    
+    def forward(self, input):
+        return self.model(input)
+
 
 def calcGradientPenalty(netD, real_data, fake_data):
     batch_size = real_data.shape[0]
@@ -185,22 +221,25 @@ def calcGradientPenalty(netD, real_data, fake_data):
     return gradientPenalty 
 
 def get_discriminator(name, dataset):
-    if name not in ['gan', 'ganWithoutBN']:
+    if name not in ['gan', 'ganWithoutBN', 'patchGan']:
         raise ValueError("{} not int discriminator set ".format(name))
 
     if name is "gan":
         return Discriminator(dataset)
     elif name is "ganWithoutBN":
         return DiscriminatorWithoutBN(dataset)
+    elif name is "patchGan":
+        return pix2pixelGanDiscriminator(4)
     
 def main():
-    device = torch.device('cuda:0')
-    netD = Discriminator()
+    #evice = torch.device('cuda:0')
+    netD = pix2pixelGanDiscriminator(4)
     netD.train()
-    netD.to(device)
+    #netD.to(device)
     
-    input = torch.rand(64, 1, 64, 64).to(device)
+    input = torch.rand(64, 4, 256, 192)
     output = netD(input)
+    print(netD)
     print (output.shape)
     pass
 

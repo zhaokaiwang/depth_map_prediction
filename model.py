@@ -9,7 +9,7 @@ def get_optim(model, op, lr):
         optim = torch.optim.SGD(model.parameters(), lr = lr, momentum=0.9)
         return optim    
     elif op is 'adam':
-        optim = torch.optim.Adam(model.parameters(), lr=lr)
+        optim = torch.optim.Adam(model.parameters(), lr=lr, betas=(0.5, 0.999))
         return optim
     elif op is 'rmsprop':
         optim = torch.optim.RMSprop(model.parameters(), lr=lr)

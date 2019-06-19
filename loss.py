@@ -187,6 +187,22 @@ class ContentLoss(nn.Module):
         self.loss = F.mse_loss(input, self.target)
         return input
     
+class normalGanLoss(nn.Module):
+    def __init__(self, mode):
+        super(normalGanLoss, self).__init__()
+        if mode == 'lsgan':
+            self.loss = nn.MSELoss()
+        elif mode == 'vanilla':
+            self.loss = nn.BCEWithLogitsLoss
+        else:
+            raise NotImplementedError("gan mode %s not implemented" % mode)
+    
+    def forward(self, predict, label):
+        target_tensor = label
+        target_tensor.expand_as(predict)
+        loss = self.loss(predict, target_tensor)
+        return loss
+        
 def gram_matrix(input):
     b, c, h, w = input.size()
     features = input.view(b * c, h * w)
@@ -296,7 +312,7 @@ def error_mertic(predict, target):
 
 def get_loss(loss):
     if loss not in ['l1Loss', 'l2Loss', 'berhuLoss', 'l1l2Loss',
-                    'huberLoss', 'smoothL1', 'perceptualLoss']:
+                    'huberLoss', 'smoothL1', 'perceptualLoss', 'normalGanLoss']:
         raise NotImplementedError('loss {} has not been supported'.format(loss))
 
     if loss is 'l1Loss':
@@ -312,7 +328,9 @@ def get_loss(loss):
     elif loss is 'smoothL1':
         return smoothL1Loss()
     elif loss is 'perceptualLoss':
-        return get_perceptual_loss
+        return get_perceptual_loss()
+    elif loss is 'normalGanLoss':
+        return normalGanLoss('vanilla')
 
 
 def main():

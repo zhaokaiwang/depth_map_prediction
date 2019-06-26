@@ -436,13 +436,113 @@ class resnet_deconv_sum(nn.Module):
         output = torch.squeeze(output, dim=1)
         return output
 
-def main():
-    device = torch.device('cuda:0')
-    model = resnet_upsample('Make3D')
+class unpool_as_conv(nn.Module):
+    def __init__(self, input_channel, output_channel):
+        super (unpool_as_conv, self).__init__()
+        self.conv3x3 = nn.Conv2d(input_channel, output_channel, 3, stride=1, padding=1, bias=False)
+        self.conv2x3 = nn.Conv2d(input_channel, output_channel, 3, stride=1, padding=1,bias=False)
+        self.conv3x2 = nn.Conv2d(input_channel, output_channel, 3, stride=1, padding=1, bias=False)
+        self.conv2x2 = nn.Conv2d(input_channel, output_channel, 3, stride=1, padding=1, bias=False)
+        self.bn = nn.BatchNorm2d(output_channel)
 
-    model.to(device)
+        
+    def forward(self, input):
+        conv3x3 = self.conv3x3(input)
+        conv2x2 = self.conv2x2(input)
+        conv3x2 = self.conv3x2(input)
+        conv2x3 = self.conv2x3(input)
+
+        left = torch.cat([conv3x3, conv3x2], 2)
+        right = torch.cat([conv2x3, conv2x2], 2)
+
+        final = torch.cat((left, right), 3)
+        output = self.bn(final)
+        return output
+
+class up_project(nn.Module):
+    def __init__(self, input_channel, output_channel):
+        super(up_project, self).__init__()
+        self.branch1 = unpool_as_conv(input_channel, output_channel)
+        self.conv = nn.Conv2d(output_channel, output_channel, 3, paddind=1, bias=False)
+        self.bn = nn.BatchNorm2d(output_channel)
+        self.branch2 = unpool_as_conv(input_channel, output_channel)
+        self.relu = nn.ReLU(True)
+    
+    def forward(self, input):
+        branch1 = self.branch1(input)
+        branch1 = self.relu(branch1)
+        branch1 = self.bn(self.conv(branch1))
+        branch2 = self.branch2(input)
+        output =  self.relu(branch1 + branch2)
+        return output
+    
+class resnet_up_projection(nn.Module):
+    def __init__(self, dataset, source=False):
+        super(resnet_up_projection, self).__init__()
+
+        self.source = source
+
+        self.model = torchvision.models.resnet50(pretrained=True)
+
+        #Read the config file and the input and source resolution
+        self.input_height = int(get_config(dataset, 'input_height'))
+        self.input_weight = int(get_config(dataset, 'input_weight'))
+
+        self.source_height = int(get_config(dataset, 'source_height'))
+        self.source_weight = int(get_config(dataset, 'source_weight'))
+
+        self.output_height = int(get_config(dataset, 'output_height'))
+        self.output_weight = int(get_config(dataset, 'output_weight'))
+        
+        input_channel = 2048
+        self.conv = nn.Conv2d(input_channel, input_channel // 2 , 1, 1, bias=False)
+        self.bn = nn.BatchNorm2d(input_channel)
+
+        input_channel =  1024
+        self.final = nn.Conv2d(64, 1, 3, padding=1, bias=False)
+        for i in range(4):
+            self.add_module("up{}".format(i), up_project(input_channel, input_channel // 2))
+            input_channel = input_channel // 2
+
+        if self.source is False:
+            self.upsample = nn.Upsample((self.input_height, self.input_weight), mode='bilinear', align_corners=True)
+        else:
+            self.upsample = nn.Upsample((self.source_height, self.source_weight), mode='bilinear', align_corners=True)
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight)
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+
+    def forward(self, input):
+        output = self.model.conv1(input)
+        output = self.model.bn1(output)
+        output = self.model.relu(output)
+        output = self.model.maxpool(output)
+
+        output = self.model.layer1(output)
+        output = self.model.layer2(output)
+        output = self.model.layer3(output)
+        output = self.model.layer4(output)
+
+        output = self.bn(self.conv(output))
+        output = self.up0(output)
+        output = self.up1(output)
+        output = self.up2(output)
+        output = self.up3(output)
+        output = self.final(output)
+        output = self.upsample(output)
+        output = torch.squeeze(output)
+        return output
+
+
+
+def main():
+    model = resnet_up_projection('Make3D')
     input = np.random.randn(4, 3, 256 , 192).astype(np.float32)
-    input = torch.from_numpy(input).cuda()
+    input = torch.from_numpy(input)
     output = model(input)
     print (output.shape)
 

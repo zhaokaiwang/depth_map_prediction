@@ -312,7 +312,7 @@ def error_mertic(predict, target):
 
 def get_loss(loss):
     if loss not in ['l1Loss', 'l2Loss', 'berhuLoss', 'l1l2Loss',
-                    'huberLoss', 'smoothL1', 'perceptualLoss', 'normalGanLoss']:
+                    'huberLoss', 'smoothL1', 'perceptualLoss', 'normalGanLoss', 'lsganLoss']:
         raise NotImplementedError('loss {} has not been supported'.format(loss))
 
     if loss is 'l1Loss':
@@ -331,6 +331,8 @@ def get_loss(loss):
         return get_perceptual_loss()
     elif loss is 'normalGanLoss':
         return normalGanLoss('vanilla')
+    elif loss is 'lsganLoss':
+        return normalGanLoss('lsgan')
 
 
 def main():

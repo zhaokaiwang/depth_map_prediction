@@ -17,7 +17,7 @@ def get_optim(model, op, lr):
 
 def get_model(mode, dataset, source):
     if mode not in ['res-fc', 'dense-fc', 'dense-fcn', 'dense-cat', 'dense-final',
-                     'resnet_deconv', 'resnet_deconv_cat', 'res-final', 'resnet_deconv_sum', 'resnet_upsample']:
+                     'resnet_deconv', 'resnet_up_project','resnet_deconv_cat', 'res-final', 'resnet_deconv_sum', 'resnet_upsample']:
         raise NotImplementedError('mode {} is not supported'.format(mode))
     
     if mode == 'res-fc':

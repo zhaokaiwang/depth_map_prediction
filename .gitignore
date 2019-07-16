@@ -12,3 +12,4 @@ train_data/
 *.mat 
 result/
 *.npy 
+.history/

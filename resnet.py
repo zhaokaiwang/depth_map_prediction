@@ -104,10 +104,10 @@ class resnet_deconv_cat(nn.Module):
         self.output_height = int(get_config(dataset, 'output_height'))
         self.output_weight = int(get_config(dataset, 'output_weight'))
 
-        self.deconv1 = nn.ConvTranspose2d(4096, 1024, 3, stride=2, padding=1, output_padding=1)
-        self.deconv2 = nn.ConvTranspose2d(2048, 512, 3, stride=2, padding=1, output_padding=1)
-        self.deconv3 = nn.ConvTranspose2d(1024, 256, 3, stride=2, padding=1, output_padding=1)
-        self.deconv4 = nn.ConvTranspose2d(512, 128, 3, stride=2, padding=1, output_padding=1)
+        self.deconv1 = nn.ConvTranspose2d(4096, 1024, 4, stride=2, padding=1, output_padding=0)
+        self.deconv2 = nn.ConvTranspose2d(2048, 512, 4, stride=2, padding=1, output_padding=0)
+        self.deconv3 = nn.ConvTranspose2d(1024, 256, 4, stride=2, padding=1, output_padding=0)
+        self.deconv4 = nn.ConvTranspose2d(512, 128, 4, stride=2, padding=1, output_padding=0)
 
         for i in range(1, 5):
             self.add_module('conv_{}'.format(i), _basic_block(int(math.pow(2, i - 1)) * 256))
@@ -445,6 +445,12 @@ class unpool_as_conv(nn.Module):
         self.conv2x2 = nn.Conv2d(input_channel, output_channel, 3, stride=1, padding=1, bias=False)
         self.bn = nn.BatchNorm2d(output_channel)
 
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight)
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
         
     def forward(self, input):
         conv3x3 = self.conv3x3(input)
@@ -463,10 +469,17 @@ class up_project(nn.Module):
     def __init__(self, input_channel, output_channel):
         super(up_project, self).__init__()
         self.branch1 = unpool_as_conv(input_channel, output_channel)
-        self.conv = nn.Conv2d(output_channel, output_channel, 3, paddind=1, bias=False)
+        self.conv = nn.Conv2d(output_channel, output_channel, 3, padding=1, bias=False)
         self.bn = nn.BatchNorm2d(output_channel)
         self.branch2 = unpool_as_conv(input_channel, output_channel)
         self.relu = nn.ReLU(True)
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight)
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
     
     def forward(self, input):
         branch1 = self.branch1(input)
@@ -496,7 +509,7 @@ class resnet_up_projection(nn.Module):
         
         input_channel = 2048
         self.conv = nn.Conv2d(input_channel, input_channel // 2 , 1, 1, bias=False)
-        self.bn = nn.BatchNorm2d(input_channel)
+        self.bn = nn.BatchNorm2d(input_channel // 2)
 
         input_channel =  1024
         self.final = nn.Conv2d(64, 1, 3, padding=1, bias=False)

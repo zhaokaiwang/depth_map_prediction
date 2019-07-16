@@ -13,7 +13,7 @@ from image_utils import gradient
 from gan import Discriminator, WganDiscriminator
 import torchvision
 from scipy import io
-from gan_train import trainWithGan, train_with_perceptual_loss, trainWithWganGp
+from gan_train import trainWithGan, train_with_perceptual_loss
 
 def write_result(dataset, mode, load_model, index):
     device = torch.device('cuda:0')
@@ -33,7 +33,7 @@ def write_result(dataset, mode, load_model, index):
     output = np.squeeze(output, 0)
     io.savemat('result.mat', {'result': output})
 
-def visual_and_make_grid(dataset, mode_list, load_model_list, image_count=5):
+def visual_and_make_grid(dataset, mode_list, load_model_list, model_train, image_count=5):
     """Show a list of results from different models and type of model
     """
 
@@ -50,7 +50,11 @@ def visual_and_make_grid(dataset, mode_list, load_model_list, image_count=5):
         mode = model_list[i]
         model = get_model(mode, dataset, source=False)
         model.load_state_dict(torch.load(load_model_list[i]))
-        model.eval()
+
+        if (model_train[i]):
+            model.train()
+        else:
+            model.eval()
         model.to(device)
 
         output = model(images)
@@ -231,14 +235,14 @@ def train(mode, dataset, epochs, loss='l1Loss', op='momentum', lr=1e-2, batch_si
 
         optim.step()
 
-        if i % 10 == 0:
+        if i % 100 == 0:
             print (i, loss.cpu().detach().numpy())
 
         if i % epoch == epoch - 1:
             torch.save(model.state_dict(), '{}/{}.pkl'.format(save_dir,start_index + i // epoch))
     pass
 
-def test(dataset, mode,  load_model, batch_size=4):
+def test(dataset, mode,  load_model, batch_size=4, model_train = False):
     device = torch.device('cuda:0')
     test_count = int(get_config(dataset, 'test_count'))
     
@@ -247,7 +251,10 @@ def test(dataset, mode,  load_model, batch_size=4):
 
     tmp = torch.load(load_model)
     model.load_state_dict(tmp)
-    model.eval()
+    if (model_train):
+        model.train()
+    else:
+        model.eval()
 
     temp = test_count // batch_size
 
@@ -376,26 +383,75 @@ def write_all_result(dataset, mode, load_model, prefix):
     # io.savemat('{}_image.mat'.format(prefix), {'image': image_set})
     # io.savemat('{}_depth.mat'.format(prefix), {'pred': depths})
 
-# trainWithWganGp('resnet_upsample', 'ganWithoutBN', 'NyuV2', 10, batch_size=8, loss='l1Loss', 
-#       save_dir=r'D:\nyuv2\model\nyuv2\resnet_upsample_wgan_gp', 
-#       lr=1e-2 , op='momentum', start_index=0)
+# trainWithGan('resnet_deconv_cat', 'patchGan', 'NyuV2', 20, batch_size=8, loss='l1Loss', 
+#       save_dir=r'D:\nyuv2\model\nyuv2\res_resnet_deconv_cat_l1_raw_gan_lr_1e-4', load_dis_model=None, 
+#       load_gen_model=None, lr=1e-4, op='adam', start_index=0)
 
-trainWithWganGp('resnet_deconv_cat', 'ganWithoutBN', 'Make3D', 10, batch_size=8, loss='l1Loss', 
-      save_dir=r'D:\nyuv2\model\make3d\res_deconv_cat_l1_raw_gan', load_dis_model=None, 
-      load_gen_model=None, lr=1e-2 , op='momentum', start_index=0)
+# trainWithGan('resnet_deconv_cat', 'patchGan', 'NyuV2', 10, batch_size=8, loss='l1Loss', 
+#       save_dir=r'D:\nyuv2\model\nyuv2\res__l1_raw_ganlr_1e-3', load_dis_model=None, 
+#       load_gen_model=None, lr=1e-3 , op='adam', start_index=0)
 
-# train('resnet_upsample', 'Make3D', 20, batch_size=16, loss='l1Loss', 
-#       save_dir=r'D:\nyuv2\model\make3d\resnet_upsample', load_model=None,
+# trainWithGan('resnet_upsample', 'patchGan', 'NyuV2', 10, batch_size=8, loss='l1Loss', 
+#     save_dir=r'D:\nyuv2\model\nyuv2\res_upsample_l1_raw_gan_lr_1e-4', load_dis_model=None, 
+#     load_gen_model=None, lr=1e-4 , op='adam', start_index=0)
+
+# trainWithGan('resnet_deconv_cat', 'patchGan', 'Make3D', 20, batch_size=8, loss='l1Loss', 
+#     save_dir=r'D:\nyuv2\model\make3d\resnet_deconv_cat_l1_lsgan_lr_1e-2', load_dis_model=None, 
+#     load_gen_model=None, lr=1e-2, op='adam', start_index=0)
+# trainWithGan('resnet_deconv_cat', 'patchGan', 'Make3D', 20, batch_size=8, loss='l1Loss', 
+#     save_dir=r'D:\nyuv2\model\make3d\resnet_deconv_cat_l1_lsgan_lr_1e-3', load_dis_model=None, 
+#     load_gen_model=None, lr=1e-3, op='adam', start_index=0)
+# trainWithGan('resnet_deconv_cat', 'patchGan', 'Make3D', 20, batch_size=8, loss='l1Loss', 
+#     save_dir=r'D:\nyuv2\model\make3d\resnet_deconv_cat_l1_lsgan_lr_1e-4_lambda_10', load_dis_model=None, 
+#     load_gen_model=None, lr=1e-4, op='adam', start_index=0, LAMBDA=10)
+
+trainWithGan('resnet_deconv_cat', 'patchGan', 'NyuV2', 20, batch_size=8, loss='l1Loss', 
+    save_dir=r'D:\nyuv2\model\nyuv2\resnet_deconv_cat_l1_lsgan_lr_1e-4_lambda_1', load_dis_model=None, 
+    load_gen_model=None, lr=1e-4, op='adam', start_index=0, LAMBDA=1)
+
+# trainWithGan('resnet_deconv_cat', 'patchGan', 'Make3D', 20, batch_size=8, loss='l1Loss', 
+#     save_dir=r'D:\nyuv2\model\make3d\resnet_deconv_cat_l1_lsgan_lr_1e-4_lambda_0.01', load_dis_model=None, 
+#     load_gen_model=None, lr=1e-4, op='adam', start_index=0, LAMBDA=0.01)
+
+# trainWithGan('resnet_deconv_cat', 'patchGan', 'Make3D', 20, batch_size=8, loss='l1Loss', 
+#     save_dir=r'D:\nyuv2\model\make3d\resnet_deconv_cat_l1_lsgan_lr_1e-5', load_dis_model=None, 
+#     load_gen_model=None, lr=1e-5, op='adam', start_index=0)
+
+# train('resnet_deconv_cat', 'NyuV2', 20, batch_size=8, loss='l1Loss', 
+#       save_dir=r'D:\nyuv2\model\nyuv2\resnet_deconv_cat_new_l1', load_model=None,
+#       lr=1e-2, op='momentum', start_index=0, with_grad=False)    
+
+# train('resnet_deconv_cat', 'NyuV2', 20, batch_size=8, loss='l1Loss', 
+# train('resnet_deconv_cat', 'NyuV2', 20, batch_size=8, loss='l1Loss', 
+#       save_dir=r'D:\nyuv2\model\nyuv2\resnet_deconv_cat_new_l1', load_model=None,
 #       lr=1e-2, op='momentum', start_index=0, with_grad=False)     
+
+# train('resnet_up_project', 'Make3D', 40, batch_size=8, loss='l1Loss', 
+#       save_dir=r'D:\nyuv2\model\make3d\resnet_up_projection_l1', load_model=None,
+#       lr=1e-2, op='momentum', start_index=0, with_grad=False)  
 
 # train_with_perceptual_loss('resnet_deconv_cat', 'Make3D', 20, batch_size=8, loss='l1Loss', 
 #       save_dir=r'D:\nyuv2\model\make3d\res_deconv_cat_l1_perceptual_relu1', 
 #       lr=1e-2 , op='momentum', start_index=0, load_model=None)
 
-# for i in range(10):
-#     print (i)
-#     test('Make3D', 'resnet_upsample', r'D:\nyuv2\model\make3d\resnet_upsample\{}.pkl'.format(i), 4)
-#     test('Make3D', 'resnet_upsample', r'D:\nyuv2\model\make3d\resnet_upsample_wgan_gp\gen{}.pkl'.format(i), 16)
+
+# for i in range(20):
+#    print (i)
+#     # test('Make3D', 'resnet_up_project', r'D:\nyuv2\model\make3d\resnet_up_projection_l1\{}.pkl'.format(i), 8)
+    #test('Make3D', 'resnet_deconv_cat', r'D:\nyuv2\model\nyuv2\resnet_deconv_cat_new_l1\{}.pkl'.format(i), 8)
+    # test('Make3D', 'resnet_deconv_cat', r'D:\nyuv2\model\make3d\resnet_deconv_cat_l1_lsgan_lr_1e-2\gen{}.pkl'.format(i), 8, model_train=True)
+    # test('Make3D', 'resnet_deconv_cat', r'D:\nyuv2\model\make3d\resnet_deconv_cat_l1_lsgan_lr_1e-3\gen{}.pkl'.format(i), 8, model_train=True)
+    #
+    # test('NyuV2', 'resnet_deconv_cat', r'D:\nyuv2\model\nyuv2\\resnet_deconv_cat_new_l1\{}.pkl'.format(i), 8, model_train=False)
+    # test('NyuV2', 'resnet_deconv_cat', r'D:\nyuv2\model\nyuv2\\resnet_deconv_cat_l1_lsgan_lr_1e-4_lambda_100\gen{}.pkl'.format(i), 8, model_train=True)
+    # test('Make3D', 'resnet_deconv_cat', r'D:\nyuv2\model\make3d\resnet_deconv_cat_l1_lsgan_lr_1e-4_lambda_10\gen{}.pkl'.format(i), 8, model_train=True)
+    # test('Make3D', 'resnet_deconv_cat', r'D:\nyuv2\model\make3d\resnet_deconv_cat_l1_lsgan_lr_1e-4\gen{}.pkl'.format(i), 8, model_train=True)
+    # test('Make3D', 'resnet_deconv_cat', r'D:\nyuv2\model\make3d\resnet_deconv_cat_l1_lsgan_lr_1e-4_lambda_0.1\gen{}.pkl'.format(i), 8, model_train=True)
+
+    # test('Make3D', 'resnet_deconv_cat', r'D:\nyuv2\model\make3d\resnet_deconv_cat_l1_lsgan_lr_1e-5\gen{}.pkl'.format(i), 8, model_train=True)
+
+#     test('Make3D', 'resnet_upsample', r'D:\nyuv2\model\make3d\res_upsample_l1_raw_gan_lr_1e-5\gen{}.pkl'.format(i), 8)
+
     # test('NyuV2', 'resnet_upsample', r'D:\nyuv2\model\nyuv2\resnet_upsample_wgan_gp\gen{}.pkl'.format(i), 4)
     # test('NyuV2', 'resnet_deconv_cat', r'D:\nyuv2\model\nyuv2\res_deconv_cat\{}.pkl'.format(i), 4)
     # test('NyuV2', 'resnet_deconv_cat', r'D:\nyuv2\model\nyuv2\res_deconv_cat_grad\{}.pkl'.format(i), 4)
@@ -404,12 +460,15 @@ trainWithWganGp('resnet_deconv_cat', 'ganWithoutBN', 'Make3D', 10, batch_size=8,
     # test('Make3D', 'resnet_deconv_cat', r'D:\nyuv2\model\make3d\res_deconv_cat\{}.pkl'.format(i), 4)
 #     test('Make3D', 'resnet_deconv', r'D:\nyuv2\model\make3d\res_deconv\{}.pkl'.format(i), 4)
 
-# model_list = ['resnet_upsample', 'resnet_upsample']
-# load_model_list = [r'D:\nyuv2\model\make3d\resnet_upsample\8.pkl',
-#      r'D:\nyuv2\model\make3d\resnet_upsample_wgan_gp\gen8.pkl']
+# model_list = ['resnet_deconv_cat', 'resnet_deconv_cat']
+
+# load_model_list = [r'D:\nyuv2\model\nyuv2\resnet_deconv_cat_l1_lsgan_lr_1e-4_lambda_100\gen19.pkl',
+#                     r'D:\nyuv2\model\nyuv2\resnet_deconv_cat_new_l1\19.pkl']
+# model_train = [True, False]
+
 # while 1:
-#     visual_and_make_grid('Make3D', model_list, load_model_list, image_count=2)
-visual_random('resnet_deconv_cat', 'Make3D', r'D:\nyuv2\model\make3d\res_deconv_cat_l1_raw_gan\gen2.pkl', 5)
+#     visual_and_make_grid('NyuV2', model_list, load_model_list, model_train, image_count=2)
+# visual_random('resnet_deconv_cat', 'NyuV2', r'D:\nyuv2\model\nyuv2\res_resnet_deconv_cat_l1_raw_gan_lr_1e-4\gen19.pkl', 5)
 
 #write_result('NyuV2', 'resnet_deconv_cat', r'D:\nyuv2\model\nyuv2\res_deconv_cat\7.pkl', 1)
 

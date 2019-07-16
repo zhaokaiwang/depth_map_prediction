@@ -15,7 +15,7 @@ def set_required_grad(nets, requireds_grad = False):
         param.requireds_grad = requireds_grad
     
 def trainWithGan(mode, dis_mode,dataset, epochs, loss='l1Loss', gan_loss = 'vanllia', op='momentum', lr=1e-2, batch_size=4,
-                 load_gen_model=None, load_dis_model=None, save_dir=None, source=False, start_index = 0):
+                 load_gen_model=None, load_dis_model=None, save_dir=None, source=False, start_index = 0, LAMBDA = 1):
     device = torch.device('cuda:0')
     # Get model 
     netG = get_model(mode, dataset, source)
@@ -39,8 +39,7 @@ def trainWithGan(mode, dis_mode,dataset, epochs, loss='l1Loss', gan_loss = 'vanl
     loss_normal.to(device)
 
     # gan loss
-    loss_gan = get_loss('normalGan')
-    loss_gan = loss_gan(gan_loss)
+    loss_gan = get_loss('lsganLoss')
     loss_gan.to(device)
 
     # loss in Gen and Dis 
@@ -73,39 +72,39 @@ def trainWithGan(mode, dis_mode,dataset, epochs, loss='l1Loss', gan_loss = 'vanl
         fake_predict = netG(images)
         fake_predict = torch.unsqueeze(fake_predict, 1)        
 
-        optimD.zero_grad()
         set_required_grad(netD, True)
+        optimD.zero_grad()
 
         # backward the netD
-        fake_predict_temp = torch.cat([images, fake_predict], 1)
+        fake_predict_temp = torch.cat([images, fake_predict.detach()], 1)
         image_depth_pair = torch.cat([images, torch.unsqueeze(depths, 1)], 1)
         
         #fake
         pred_fake = netD(fake_predict_temp.detach())
-        loss_D_fake = loss_gan(fake_predict, False)
+        loss_D_fake = loss_gan(fake_predict, 0.)
 
         #real
         real_predict = netD(image_depth_pair)
-        loss_D_real = loss_gan(real_predict, True)
+        loss_D_real = loss_gan(real_predict, 1.)
         
         lossD = (loss_D_fake + loss_D_real) * 0.5
-        lossD.backward()
+        lossD.backward(retain_graph=True)
         optimD.step()
 
         # backward netG
         set_required_grad(netD, False)
         optimG.zero_grad()
 
-        fake_predict = torch.cat([images, fake_predict], 1)
-        pred_fake = netD(fake_predict)
-        loss_G_GAN = loss_gan(pred_fake, True)
-        loss_l1 = loss_normal(fake_predict, depths, mask)
-        loss_G = loss_G_GAN + loss_l1
+        fake_predict_temp = torch.cat([images, fake_predict], 1)
+        pred_fake = netD(fake_predict_temp)
+        loss_G_GAN = loss_gan(pred_fake, 1.)
+        loss_l1 = loss_normal(torch.squeeze(fake_predict, 1), depths, mask)
+        loss_G = loss_G_GAN + loss_l1 * LAMBDA 
         loss_G.backward()
         optimG.step()
 
-        if i % 50 == 0:
-            print (i, loss_l1.cpu().detach().numpy())
+        if i % 100 == 0:
+            print (i, loss_G_GAN.cpu().detach().numpy(), loss_l1.cpu().detach().numpy())
 
         if i % epoch == epoch - 1:
             torch.save(netG.state_dict(), '{}/gen{}.pkl'.format(save_dir,start_index + i // epoch))

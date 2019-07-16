@@ -198,8 +198,8 @@ class normalGanLoss(nn.Module):
             raise NotImplementedError("gan mode %s not implemented" % mode)
     
     def forward(self, predict, label):
-        target_tensor = label
-        target_tensor.expand_as(predict)
+        target_tensor = torch.tensor(label).cuda()
+        target_tensor = target_tensor.expand_as(predict)
         loss = self.loss(predict, target_tensor)
         return loss
         

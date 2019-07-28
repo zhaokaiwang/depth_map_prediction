@@ -4,6 +4,7 @@ import numpy as np
 import copy
 import torch.nn.functional as F
 import torchvision
+from math import exp
 
 
 class l1Loss(nn.Module):
@@ -291,6 +292,52 @@ def get_perceptual_loss(cnn, content_images, style_images):
                            style_images, content_images, content_layers_default,
                            style_layers_default)
 
+
+class SSIMLoss(nn.Module):
+    def gaussian(windows_size, sigma):
+        gauss = torch.Tensor([exp(-(x - windows_size // 2) ** 2 / float(2 * sigma ** 2)) for x in range(windows_size)])
+        return gauss / gauss.sum()
+    
+    def create_window(windows_size, channel):
+        _1d_window = gaussian(1.5).unsqueeze(1)
+        _2d_window = _1d_window.mm(_1d_window.t()).float().unsqueeze(0).unsqueeze(0)
+        window = _2d_window.expand(channel, 1, window, window).contiguous()
+        return window
+
+    def __ssim(img1, img2, window, windows_size, channel, size_average = True):
+        mu1 = F.conv2d(img1, window, padding = windows_size // 2, group = channel)
+        mu2 = F.conv2d(img2, window, padding = windows_size // 2, group = channel)
+
+        mu1_sq = mu1.pow(2)
+        mu2_sq = mu2.pow(2)
+        mu1_mu2 = mu1 * mu2 
+
+        sigma1_sq = F.conv2d(img1 * img1, window, padding =  windows_size // 2, group = channel)
+        sigma2_sq = F.conv2d(img2 * img2, window, padding =  windows_size // 2, group = channel)
+        sigma12 = F.conv2d(img1 * img2, window, padding = windows_size // 2, group = channel)
+
+        C1 = 0.01 ** 2
+        C2 = 0.03 ** 2
+        
+        ssim_map = ((2*mu1_mu2 + C1)*(2*sigma12 + C2))/((mu1_sq + mu2_sq + C1)*(sigma1_sq + sigma2_sq + C2))
+
+        if size_average:
+            return ssim_map.mean()
+        else:
+            return ssim_map.mean(1).mean(1).mean(1)
+
+    def __init__(self, window_size = 11, size_average = True):
+        super(SSIMLoss, self).__init__()
+        self.window_size = window_size
+        self.size_average = size_average
+        self.channel = 1
+        self.window = create_window(self.window_size, 1)
+    
+    def forward(self, input, target):
+        if input.is_cuda():
+            __ssim.cuda(input.get_device)
+        return __ssim(input, target, self.window, self.window_size)
+
 def error_mertic(predict, target):
     device = torch.device('cuda:0')
 
@@ -312,7 +359,7 @@ def error_mertic(predict, target):
 
 def get_loss(loss):
     if loss not in ['l1Loss', 'l2Loss', 'berhuLoss', 'l1l2Loss',
-                    'huberLoss', 'smoothL1', 'perceptualLoss', 'normalGanLoss', 'lsganLoss']:
+                    'huberLoss', 'smoothL1', 'perceptualLoss', 'normalGanLoss', 'lsganLoss', 'ssimLoss']:
         raise NotImplementedError('loss {} has not been supported'.format(loss))
 
     if loss is 'l1Loss':
@@ -333,6 +380,8 @@ def get_loss(loss):
         return normalGanLoss('vanilla')
     elif loss is 'lsganLoss':
         return normalGanLoss('lsgan')
+    elif loss is 'ssimLoss':
+        return SSIMLoss()
 
 
 def main():

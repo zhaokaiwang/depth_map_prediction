@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-import torch.functional as F
-
+import torch.nn.functional as F
+import numpy as np
 
 normalization = nn.GroupNorm
 def conv3x3(input_channel, output_channel, strides=1):
@@ -130,10 +130,43 @@ class HighResolutionModule(nn.Module):
         self.fuse_method = fuse_method
         self.num_branches = num_branches
     
-        self.mutil_sclae_output = True
+        self.mutil_sclae_output = mutil_sclae_output
+        self.branches = self._make_branches(num_branches, blocks, num_blocks, num_outchannels)
         self.fuse_layers = self._make_fuse_layers()
         self.relu = nn.ReLU(inplace=True)
     
+    # 生成一个分支
+    def _make_one_branch(self, branch_index, block, num_blocks, num_channels, 
+                        stride = 1):
+        downsample = None
+
+        if stride != 1 or \
+            self.num_inchannels[branch_index] != num_channels[branch_index] * block.expansion:
+            downsample = nn.Sequential(
+                nn.Conv2d(self.num_inchannels[branch_index], num_channels[branch_index] * block.expansion,
+                kernel_size=1, stride=stride, bias=False),
+                normalization(num_channels[branch_index] * block.expansion),
+            )
+        
+        layers = []
+
+        layers.append(block(self.num_inchannels[branch_index], num_channels[branch_index], stride, downsample))
+        self.num_inchannels[branch_index] = num_channels[branch_index]* block.expansion
+
+        for i in range(1, num_blocks[branch_index]):
+            layers.append(block(self.num_inchannels[branch_index], num_channels[branch_index]))
+        
+        return nn.Sequential(*layers)
+    
+    # 生成多个分支
+    def _make_branches(self, num_branches, block, nums_blocks, num_channels): 
+        branches = []
+
+        for i in range(num_branches):
+            branches.append(self._make_one_branch(i, block, nums_blocks, num_channels))
+        
+        return nn.ModuleList(branches)
+
     def _make_fuse_layers(self):
         if self.num_branches == 1:
             return None
@@ -176,8 +209,44 @@ class HighResolutionModule(nn.Module):
                     fuse_layer.append(nn.Sequential(*conv3x3s))
             fuse_layers.append(nn.ModuleList(fuse_layer))
         return nn.ModuleList(fuse_layers)
-                        
 
+    def get_num_inchannels(self):
+        return self.num_inchannels
+
+    def forward(self, x):
+        if self.num_branches == 1:
+            return [self.branches[0](x[0])]
+
+        # 多个分支的forward
+        for i in range(self.num_branches):
+            x[i] = self.branches[i](x[i])
+        
+        # fuse 多个分支
+        x_fuse = []
+
+        for i in range(len(self.fuse_layers)):
+            y = x[0] if i == 0 else self.fuse_layers[i][0](x[0])
+            for j in range(1, self.num_branches):
+                if i == j:
+                    y = y + x[j]
+                elif j > 1:
+                    width_output = x[i].shape[-1]
+                    height_output = x[i].shape[-2]
+                    y = y + F.interpolate(
+                        self.fuse_layers[i][j](x[j]),
+                        size = [height_output, width_output],
+                        mode='bilinear',
+                    )
+                else:
+                    y = y + self.fuse_layers[i][j](x[j]),
+            x_fuse.append(self.relu(y))
+        
+        return x_fuse
+
+blocks_dict = {
+    'BASIC': BasicBlock,
+    'BOTTLENECK': Bottleneck
+}
 
 class HighResolutionNet(nn.Module):
     def __init__(self):
@@ -190,7 +259,70 @@ class HighResolutionNet(nn.Module):
         self.norm2 = normalization(64)
         self.relu = nn.ReLU(inplac=True)
 
-        self.layer1 = self.makr
+        self.layer1 = self._make_layer(Bottleneck, 64, 64, 4)
+
+        #stage 2 
+        self.stage2_cfg = {
+            'NUM_MODULES':1,
+            'NUM_BRANCHES':2,
+            'NUM_BLOCKS':[4, 4],
+            'NUM_CHANNELS':[32, 64],
+            'BLOCK': 'BASIC',
+            'FUSE_METHOD': 'SUM',
+        }
+
+        num_channels = self.stage2_cfg['NUM_CHANNELS']
+        block = blocks_dict[self.stage2_cfg['BLOCK']]
+        num_channels = [
+            num_channels[i] * block.expansion for i in range(len(num_channels))
+        ]
+        self.transition1 = self._make_transition_layer([256], num_channels)
+        self.stage2, pre_stage_channels = self._make_stage(
+            self.stage2_cfg, num_channels)
+
+        self.stage3_cfg = {
+            'NUM_MODULES':1,
+            'NUM_BRANCHES':3,
+            'NUM_BLOCKS':[4, 4, 4],
+            'NUM_CHANNELS':[32, 64, 128],
+            'BLOCK': 'BASIC',
+            'FUSE_METHOD': 'SUM',
+        }
+
+        num_channels = self.stage3_cfg['NUM_CHANNELS']
+        block = blocks_dict[self.stage3_cfg['BLOCK']]
+        num_channels = [
+            num_channels[i] * block.expansion for i in range(len(num_channels))
+        ]
+        self.transition2 = self._make_transition_layer(pre_stage_channels, num_channels)
+        self.stage3, pre_stage_channels = self._make_stage(
+            self.stage3_cfg, num_channels)
+
+        self.stage4_cfg = {
+            'NUM_MODULES':1,
+            'NUM_BRANCHES':3,
+            'NUM_BLOCKS':[4, 4, 4],
+            'NUM_CHANNELS':[32, 64, 128],
+            'BLOCK': 'BASIC',
+            'FUSE_METHOD': 'SUM',
+        }
+
+        num_channels = self.stage4_cfg['NUM_CHANNELS']
+        block = blocks_dict[self.stage4_cfg['BLOCK']]
+        num_channels = [
+            num_channels[i] * block.expansion for i in range(len(num_channels))
+        ]
+        self.transition3 = self._make_transition_layer(pre_stage_channels, num_channels)
+        self.stage4, pre_stage_channels = self._make_stage(
+            self.stage4_cfg, num_channels)
+        
+        last_inp_channels = np.int(np.sum(pre_stage_channels))
+
+        self.last_layer = nn.Sequential(
+            nn.Conv2d(last_inp_channels, last_inp_channels, kernel_size=1, stride=1, padding = 0),
+            normalization(last_inp_channels),
+            nn.ReLU(inplace=True),
+        )
 
     def _make_layer (self, block, input_channel, output_channel, blocks, stride):
         downsample = None
@@ -242,3 +374,75 @@ class HighResolutionNet(nn.Module):
                 transition_layers.append(nn.Sequential(*conv3x3s))
         
         return nn.ModuleList(transition_layers)
+
+    def _make_stage(self, layer_config, num_inchannels, mutil_scale_output=True):
+        num_modules = layer_config["NUM_MODULSE"]
+        num_branches = layer_config["NUM_BRANCHES"]
+        num_blocks = layer_config['NUM_BLOCKS']
+        num_channels = layer_config['NUM_CHANNELS']
+        block = blocks_dict[layer_config['BLOCK']]
+        fuse_method = layer_config["FUSE_METHOD"]
+
+        modules = []
+        for i in range(num_modules):
+            if not mutil_scale_output and i == num_modules - 1:
+                reset_mutil_scale_output = False
+            else:
+                reset_mutil_scale_output = True
+            
+            modules.append(
+                HighResolutionModule(
+                    num_branches,
+                    block,
+                    num_blocks,
+                    num_inchannels,
+                    num_channels,
+                    fuse_method,
+                    reset_mutil_scale_output)
+            )
+            num_inchannels = modules[-1].get_num_inchannels()
+        return nn.Sequential(*modules), num_inchannels
+    
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.norm1(x)
+        x = self.relu(x)
+        x = self.conv2(x)
+        x = self.norm2(x)
+        x = self.relu(x)
+        
+        x_list = []
+
+        for i in range(self.stage2_cfg['NUM_BRANCHES']):
+            if self.transition1[i] is not None:
+                x_list.append(self.transition1[i](x))
+            else:
+                x_list.append(x)
+        y_list = self.stage2(x_list)
+
+        x_list = []
+        for i in range(self.stage3_cfg["NUM_BRANCHES"]):
+            if self.transition2[i] is not None:
+                x_list.append(self.transition2[i](y_list[-1]))
+            else:
+                x_list.append(x)
+        
+        y_list = self.stage3(x_list)
+
+        x_list = []
+        
+        for i in range(self.stage4_cfg["NUM_BRANCHES"]):
+            if self.transition3[i] is not None:
+                x_list.append(self.transition3[i](y_list[-1]))
+            else:
+                x_list.append(y_list[i])
+        x = self.stage4(x_list)
+        
+        x0_h, x0_w = x[0].size(2),  x[0].size(3)
+        x1 = F.upsample(x[1], size=(x0_h, x0_w), mode='bilinear')
+        x2 = F.upsample(x[2], size=(x0_h, x0_w), mode='bilinear')
+        x3 = F.upsample(x[3], size=(x0_h, x0_w), mode='bilinear')
+
+        x = torch.cat([x[0], x1, x2, x3], 1)
+        x = self.last_layer(x)
+        return x
